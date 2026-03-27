@@ -39,8 +39,7 @@ class SpringBootAdminClientOAuth2AutoConfigurationTest {
 				DispatcherServletAutoConfiguration.class, SpringBootAdminClientAutoConfiguration.class,
 				SpringBootAdminClientOAuth2AutoConfiguration.class))
 		.withBean(RestClient.Builder.class, RestClient::builder)
-		.withPropertyValues("spring.boot.admin.client.url:http://localhost:8081",
-				"spring.boot.admin.client.instance.metadata.oauth2.registration-id:my-client")
+		.withPropertyValues("spring.boot.admin.client.url:http://localhost:8081")
 		.withInitializer(new ConditionEvaluationReportLoggingListener());
 
 	@Test
@@ -54,6 +53,28 @@ class SpringBootAdminClientOAuth2AutoConfigurationTest {
 	@Test
 	void withOAuth2AuthorizedClientManager_usesOAuth2RegistrationClient() {
 		this.contextRunner
+			.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
+			.run((context) -> {
+				assertThat(context).hasSingleBean(RegistrationClient.class);
+				assertThat(context.getBean(RegistrationClient.class)).isInstanceOf(RestClientRegistrationClient.class);
+			});
+	}
+
+	@Test
+	void withDefaultOAuth2RegistrationId_autoConfiguresWithoutMetadata() {
+		this.contextRunner.withPropertyValues("spring.boot.admin.client.oauth2-registration-id:default-client")
+			.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
+			.run((context) -> {
+				assertThat(context).hasSingleBean(RegistrationClient.class);
+				assertThat(context.getBean(RegistrationClient.class)).isInstanceOf(RestClientRegistrationClient.class);
+			});
+	}
+
+	@Test
+	void metadataRegistrationIdOverridesDefaultProperty() {
+		this.contextRunner
+			.withPropertyValues("spring.boot.admin.client.oauth2-registration-id:default-client",
+					"spring.boot.admin.client.instance.metadata.oauth2.registration-id:override-client")
 			.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
 			.run((context) -> {
 				assertThat(context).hasSingleBean(RegistrationClient.class);

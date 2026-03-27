@@ -37,10 +37,25 @@ import de.codecentric.boot.admin.client.registration.RestClientRegistrationClien
  * <li>an {@link OAuth2AuthorizedClientManager} bean is present in the context</li>
  * </ul>
  * <p>
- * The OAuth2 client registration ID is resolved from the instance metadata key
- * {@code "oauth2.registration-id"} (also accepted: {@code "oauth2-registration-id"}).
- * This is the same key used by the server when polling secured actuator endpoints,
- * providing a single consistent configuration point for both directions:
+ * Registration ID resolution order (highest priority first):
+ * <ol>
+ * <li>Instance metadata key {@code "oauth2.registration-id"} (also accepted:
+ * {@code "oauth2-registration-id"}) — per-instance override</li>
+ * <li>{@code spring.boot.admin.client.oauth2-registration-id} — default for all
+ * registrations; allows zero-metadata configuration</li>
+ * </ol>
+ * <p>
+ * Minimal zero-metadata setup:
+ *
+ * <pre>
+ * spring:
+ *   boot:
+ *     admin:
+ *       client:
+ *         oauth2-registration-id: my-client
+ * </pre>
+ *
+ * Per-instance override via metadata:
  *
  * <pre>
  * spring:
@@ -49,10 +64,10 @@ import de.codecentric.boot.admin.client.registration.RestClientRegistrationClien
  *       client:
  *         instance:
  *           metadata:
- *             oauth2.registration-id: my-client
+ *             oauth2.registration-id: my-other-client
  * </pre>
  *
- * If the key is absent from the metadata, no token is injected and registration proceeds
+ * If neither is configured, no token is injected and registration proceeds
  * unauthenticated.
  */
 @Configuration(proxyBeanMethods = false)
@@ -65,22 +80,22 @@ public class SpringBootAdminClientOAuth2AutoConfiguration {
 
 	@Bean
 	@ConditionalOnMissingBean(RegistrationClient.class)
-	public RegistrationClient oauth2RegistrationClient(InstanceProperties instance,
+	public RegistrationClient oauth2RegistrationClient(ClientProperties client, InstanceProperties instance,
 			RestClient.Builder restClientBuilder, OAuth2AuthorizedClientManager authorizedClientManager) {
 		var interceptor = new OAuth2ClientHttpRequestInterceptor(authorizedClientManager);
-		interceptor.setClientRegistrationIdResolver((request) -> resolveRegistrationId(instance));
+		interceptor.setClientRegistrationIdResolver((request) -> resolveRegistrationId(client, instance));
 		restClientBuilder.requestInterceptor(interceptor);
 		return new RestClientRegistrationClient(restClientBuilder.build());
 	}
 
-	private static String resolveRegistrationId(InstanceProperties instance) {
+	private static String resolveRegistrationId(ClientProperties client, InstanceProperties instance) {
 		for (String key : REGISTRATION_ID_KEYS) {
 			String value = instance.getMetadata().get(key);
 			if (value != null) {
 				return value;
 			}
 		}
-		return null;
+		return client.getOauth2RegistrationId();
 	}
 
 }

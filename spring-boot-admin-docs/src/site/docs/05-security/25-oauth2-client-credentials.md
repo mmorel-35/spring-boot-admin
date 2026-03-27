@@ -52,8 +52,14 @@ implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
 
 ### Configuration
 
-The registration ID is provided via the instance metadata key `oauth2.registration-id` — the same key the
-server reads when polling actuator endpoints, keeping configuration consistent in both directions:
+The registration ID is resolved in this priority order:
+
+1. **Instance metadata** key `oauth2.registration-id` — per-instance override, same key the server uses when
+   polling actuator endpoints
+2. **`spring.boot.admin.client.oauth2-registration-id`** — default that applies to all registrations;
+   allows zero-metadata configuration
+
+**Minimal setup (default property only):**
 
 ```yaml title="application.yml"
 spring:
@@ -73,23 +79,34 @@ spring:
     admin:
       client:
         url: http://admin-server:8080
+        # Works out of the box — no metadata entry required
+        oauth2-registration-id: sba-client
+```
+
+**Per-instance override via metadata** (takes precedence over `oauth2-registration-id`):
+
+```yaml title="application.yml"
+spring:
+  boot:
+    admin:
+      client:
+        url: http://admin-server:8080
+        oauth2-registration-id: default-client   # fallback
         instance:
           metadata:
-            # Registration ID used both for authenticating against the SBA server
-            # and for the server when polling this instance's actuator endpoints
-            oauth2.registration-id: sba-client
+            oauth2.registration-id: override-client  # overrides the default for this instance
 ```
 
 :::note
-When `oauth2.registration-id` is present in instance metadata, Basic Auth (`username` / `password`) is ignored for
-the registration request. The two mechanisms are mutually exclusive.
+When an OAuth2 registration ID is resolved (from either source), Basic Auth (`username` / `password`) is ignored
+for the registration request. The two mechanisms are mutually exclusive.
 :::
 
 ### How It Works
 
 When `spring-security-oauth2-client` is on the classpath and an `OAuth2AuthorizedClientManager` bean is present in
 the context, Spring Boot Admin auto-configures an `OAuth2ClientHttpRequestInterceptor` on the registration
-`RestClient`. The interceptor resolves the registration ID from the `oauth2.registration-id` metadata key, obtains
+`RestClient`. The interceptor resolves the registration ID (metadata first, then `oauth2-registration-id`), obtains
 (and caches/refreshes) a Bearer token from your Authorization Server using the configured `client_credentials`
 grant, then attaches it as an `Authorization: Bearer <token>` header on every registration request.
 
@@ -180,7 +197,8 @@ If none of the above yields a registration ID for an instance, no OAuth2 header 
 ## Combined Example
 
 Below is a minimal end-to-end example where both client registration and instance polling use OAuth2.
-Note that a single `oauth2.registration-id` metadata entry covers both directions:
+Note that `oauth2-registration-id` on the client covers the registration request, and the same value passed
+in metadata is picked up by the server when polling that instance's actuators:
 
 ### Client (`payment-service`)
 
@@ -205,9 +223,12 @@ spring:
     admin:
       client:
         url: https://admin.company.com
+        # Default: used when authenticating against the SBA server
+        oauth2-registration-id: sba-registration
         instance:
           metadata:
-            # Used by the client when registering AND by the server when polling actuators
+            # Also passed to the server so it knows which registration to use
+            # when polling this instance's actuator endpoints
             oauth2.registration-id: sba-registration
 ```
 
