@@ -22,6 +22,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.oauth2.client.OAuth2AuthorizeRequest;
 import org.springframework.security.oauth2.client.ReactiveOAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import reactor.core.publisher.Mono;
 
 import de.codecentric.boot.admin.server.domain.entities.Instance;
@@ -67,10 +68,14 @@ public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersPro
 		var request = OAuth2AuthorizeRequest.withClientRegistrationId(registrationId)
 			.principal(SBA_SERVER_PRINCIPAL)
 			.build();
-		return this.authorizedClientManager.authorize(request).map((authorizedClient) -> {
+		return this.authorizedClientManager.authorize(request).flatMap((authorizedClient) -> {
+			OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+			if (accessToken == null) {
+				return Mono.just(HttpHeaders.EMPTY);
+			}
 			HttpHeaders headers = new HttpHeaders();
-			headers.setBearerAuth(authorizedClient.getAccessToken().getTokenValue());
-			return headers;
+			headers.setBearerAuth(accessToken.getTokenValue());
+			return Mono.just(headers);
 		}).defaultIfEmpty(HttpHeaders.EMPTY);
 	}
 

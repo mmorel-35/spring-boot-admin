@@ -30,13 +30,17 @@ import de.codecentric.boot.admin.client.registration.RegistrationClient;
 import de.codecentric.boot.admin.client.registration.RestClientRegistrationClient;
 
 /**
- * Auto-configuration that replaces the default Basic Auth interceptor with an OAuth2
- * Client Credentials interceptor when both:
+ * Auto-configuration that adds an OAuth2 Client Credentials interceptor to the
+ * registration {@link RestClient} when:
  * <ul>
  * <li>{@code spring-security-oauth2-client} is on the classpath</li>
  * <li>an {@link OAuth2AuthorizedClientManager} bean is present in the context</li>
- * <li>{@code spring.boot.admin.client.oauth2-client-registration-id} is set</li>
  * </ul>
+ * <p>
+ * For the Bearer token to be attached to registration requests, also set
+ * {@code spring.boot.admin.client.oauth2-client-registration-id} to a valid
+ * {@code client_credentials} registration ID. If the property is not set, no token is
+ * injected and registration proceeds unauthenticated.
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnClass(OAuth2AuthorizedClientManager.class)
