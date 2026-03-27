@@ -29,12 +29,12 @@ import org.springframework.boot.actuate.autoconfigure.endpoint.EndpointAutoConfi
 import org.springframework.boot.actuate.autoconfigure.endpoint.web.WebEndpointAutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.logging.ConditionEvaluationReportLoggingListener;
+import org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration;
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.boot.webmvc.autoconfigure.DispatcherServletAutoConfiguration;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
-import org.springframework.security.oauth2.client.web.client.OAuth2ClientHttpRequestInterceptor;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.web.client.RestClient;
@@ -200,24 +200,25 @@ class SpringBootAdminClientOAuth2AutoConfigurationTest {
 
 			OAuth2AuthorizedClientManager manager = buildMockManager("test-client", "my-token");
 
-			ClientProperties client = new ClientProperties();
-			client.setOauth2RegistrationId("test-client");
-			InstanceProperties instance = new InstanceProperties();
-
-			var interceptor = new OAuth2ClientHttpRequestInterceptor(manager);
-			interceptor.setClientRegistrationIdResolver(
-					(req) -> SpringBootAdminClientOAuth2AutoConfiguration.resolveRegistrationId(client, instance));
-
-			RestClient restClient = RestClient.builder().requestInterceptor(interceptor).build();
-			RegistrationClient registrationClient = new RestClientRegistrationClient(restClient);
-
 			Application application = Application.create("test-app")
 				.managementUrl("http://localhost:8080/mgmt")
 				.healthUrl("http://localhost:8080/health")
 				.serviceUrl("http://localhost:8080")
 				.build();
 
-			registrationClient.register(this.wireMock.url("/instances"), application);
+			new WebApplicationContextRunner()
+				.withConfiguration(AutoConfigurations.of(RestClientAutoConfiguration.class,
+						EndpointAutoConfiguration.class, WebEndpointAutoConfiguration.class,
+						DispatcherServletAutoConfiguration.class, SpringBootAdminClientAutoConfiguration.class,
+						SpringBootAdminClientOAuth2AutoConfiguration.class))
+				.withPropertyValues("spring.boot.admin.client.url=" + this.wireMock.url("/"),
+						"spring.boot.admin.client.oauth2-registration-id=test-client")
+				.withBean(OAuth2AuthorizedClientManager.class, () -> manager)
+				.run((context) -> {
+					assertThat(context).hasSingleBean(RegistrationClient.class);
+					RegistrationClient registrationClient = context.getBean(RegistrationClient.class);
+					registrationClient.register(this.wireMock.url("/instances"), application);
+				});
 
 			this.wireMock.verify(
 					postRequestedFor(urlEqualTo("/instances")).withHeader("Authorization", equalTo("Bearer my-token")));

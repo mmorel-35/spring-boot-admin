@@ -18,12 +18,14 @@ package de.codecentric.boot.admin.client.config;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.http.client.HttpClientSettings;
+import org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.support.BasicAuthenticationInterceptor;
@@ -106,6 +108,7 @@ import de.codecentric.boot.admin.client.registration.RestClientRegistrationClien
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnClass(OAuth2AuthorizedClientManager.class)
 @ConditionalOnBean(OAuth2AuthorizedClientManager.class)
+@AutoConfigureAfter(RestClientAutoConfiguration.class)
 @AutoConfigureBefore(SpringBootAdminClientAutoConfiguration.class)
 public class SpringBootAdminClientOAuth2AutoConfiguration {
 

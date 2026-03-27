@@ -170,6 +170,15 @@ the existing `BasicAuthHttpHeaderProvider`. If both are active, both sets of hea
 mechanism per environment to avoid conflicts.
 :::
 
+:::note
+`default-registration-id` and `service-map` are only applied when
+`spring.boot.admin.instance-auth.enabled` is `true` (the default). If you set
+`instance-auth.enabled=false` to suppress Basic Auth credential lookup from properties, the
+`default-registration-id` and `service-map` OAuth2 overrides are also suppressed.
+Per-instance metadata keys (`oauth2.registration-id` / `oauth2-registration-id`) continue to work
+regardless of this setting.
+:::
+
 ### Registration ID Resolution Order
 
 The registration ID is resolved in the following priority order (highest first):
