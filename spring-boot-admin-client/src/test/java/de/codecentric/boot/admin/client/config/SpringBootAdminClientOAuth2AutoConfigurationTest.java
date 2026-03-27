@@ -78,7 +78,7 @@ class SpringBootAdminClientOAuth2AutoConfigurationTest {
 		}
 
 		@Test
-		void withOAuth2AuthorizedClientManager_usesOAuth2RegistrationClient() {
+		void withOAuth2AuthorizedClientManager_butNoRegistrationId_usesUnauthenticatedRegistrationClient() {
 			this.contextRunner
 				.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
 				.run((context) -> {

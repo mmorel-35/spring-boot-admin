@@ -16,6 +16,7 @@
 
 package de.codecentric.boot.admin.server.web.client;
 
+import java.util.Collections;
 import java.util.Map;
 
 import org.jspecify.annotations.Nullable;
@@ -61,6 +62,10 @@ public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersPro
 	@Nullable private final String defaultRegistrationId;
 
 	private final Map<String, String> serviceRegistrationMap;
+
+	public OAuth2ReactiveHttpHeadersProvider(ReactiveOAuth2AuthorizedClientManager authorizedClientManager) {
+		this(authorizedClientManager, null, Collections.emptyMap());
+	}
 
 	public OAuth2ReactiveHttpHeadersProvider(ReactiveOAuth2AuthorizedClientManager authorizedClientManager,
 			@Nullable String defaultRegistrationId, Map<String, String> serviceRegistrationMap) {

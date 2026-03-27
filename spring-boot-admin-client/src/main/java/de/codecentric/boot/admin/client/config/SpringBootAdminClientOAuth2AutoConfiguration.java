@@ -113,6 +113,7 @@ public class SpringBootAdminClientOAuth2AutoConfiguration {
 	private static final String[] REGISTRATION_ID_KEYS = { "oauth2.registration-id", "oauth2-registration-id" };
 
 	@Bean
+	@ConditionalOnBean(RestClient.Builder.class)
 	@ConditionalOnMissingBean(RegistrationClient.class)
 	public RegistrationClient oauth2RegistrationClient(ClientProperties client, InstanceProperties instance,
 			RestClient.Builder restClientBuilder, OAuth2AuthorizedClientManager authorizedClientManager,

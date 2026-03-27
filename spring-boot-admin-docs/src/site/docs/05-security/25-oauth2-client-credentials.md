@@ -54,8 +54,8 @@ implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
 
 The registration ID is resolved in this priority order:
 
-1. **Instance metadata** key `oauth2.registration-id` — per-instance override, same key the server uses when
-   polling actuator endpoints
+1. **Instance metadata** key `oauth2.registration-id` (or kebab-case `oauth2-registration-id`) — per-instance override,
+   same keys the server uses when polling actuator endpoints
 2. **`spring.boot.admin.client.oauth2-registration-id`** — default that applies to all registrations;
    allows zero-metadata configuration
 
