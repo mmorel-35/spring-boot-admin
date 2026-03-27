@@ -184,7 +184,7 @@ public class AdminServerInstanceWebClientConfiguration {
 		protected static class OAuth2HttpHeadersProviderConfiguration {
 
 			@Bean
-			@ConditionalOnMissingBean(name = "oauth2ReactiveHttpHeadersProvider")
+			@ConditionalOnMissingBean(OAuth2ReactiveHttpHeadersProvider.class)
 			public OAuth2ReactiveHttpHeadersProvider oauth2ReactiveHttpHeadersProvider(
 					ReactiveOAuth2AuthorizedClientManager manager, AdminServerProperties properties) {
 				AdminServerProperties.InstanceAuthProperties instanceAuth = properties.getInstanceAuth();

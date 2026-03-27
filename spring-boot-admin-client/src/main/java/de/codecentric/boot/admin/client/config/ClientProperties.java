@@ -95,8 +95,8 @@ public class ClientProperties {
 	 * {@code authorization-grant-type: client_credentials} configured.
 	 * <p>
 	 * Individual instances may override this via their metadata key
-	 * {@code oauth2.registration-id}. When set, takes precedence over {@link #username} /
-	 * {@link #password}.
+	 * {@code oauth2.registration-id} or {@code oauth2-registration-id}. When set, takes
+	 * precedence over {@link #username} / {@link #password}.
 	 */
 	@Nullable private String oauth2RegistrationId;
 

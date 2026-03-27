@@ -54,7 +54,6 @@ import de.codecentric.boot.admin.client.registration.RestClientRegistrationClien
  * All {@link RestClient.Builder} setup applied by
  * {@link SpringBootAdminClientAutoConfiguration.RestClientRegistrationClientConfig} —
  * connect/read timeouts, Jackson message-converter customization — is replicated here.
- * Basic Auth is intentionally omitted because OAuth2 takes precedence.
  * <p>
  * Authentication precedence when building the registration {@link RestClient}:
  * <ol>
