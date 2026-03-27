@@ -75,6 +75,12 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Optional OAuth2 Client Credentials support for accessing secured instance actuators -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-client</artifactId>
+            <optional>true</optional>
+        </dependency>
         <!-- Optional Mail Starter for mail-notifications -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

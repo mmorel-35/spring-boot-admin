@@ -88,6 +88,16 @@ public class ClientProperties {
 	 */
 	private boolean enabled = true;
 
+	/**
+	 * OAuth2 client registration ID to use when authenticating against the Admin Server.
+	 * Requires {@code spring-security-oauth2-client} on the classpath and a matching
+	 * {@code spring.security.oauth2.client.registration.<id>} with
+	 * {@code authorization-grant-type: client_credentials} configured.
+	 * <p>
+	 * When set, this takes precedence over {@link #username} / {@link #password}.
+	 */
+	@Nullable private String oauth2ClientRegistrationId;
+
 	public String[] getAdminUrl() {
 		String[] adminUrls = this.url.clone();
 		for (int i = 0; i < adminUrls.length; i++) {
