@@ -24,6 +24,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.endpoint.EndpointAutoConfiguration;
 import org.springframework.boot.actuate.autoconfigure.endpoint.web.WebEndpointAutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -37,6 +38,7 @@ import org.springframework.security.oauth2.client.web.client.OAuth2ClientHttpReq
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.json.JsonMapper;
 
 import de.codecentric.boot.admin.client.registration.Application;
 import de.codecentric.boot.admin.client.registration.RegistrationClient;
@@ -51,6 +53,7 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class SpringBootAdminClientOAuth2AutoConfigurationTest {
@@ -152,6 +155,24 @@ class SpringBootAdminClientOAuth2AutoConfigurationTest {
 				.isNull();
 		}
 
+		@Test
+		void nullReturnedWhenMetadataValueIsBlank() {
+			ClientProperties client = new ClientProperties();
+			InstanceProperties instance = new InstanceProperties();
+			instance.getMetadata().put("oauth2.registration-id", "  ");
+
+			assertThat(SpringBootAdminClientOAuth2AutoConfiguration.resolveRegistrationId(client, instance)).isNull();
+		}
+
+		@Test
+		void nullReturnedWhenPropertyValueIsBlank() {
+			ClientProperties client = new ClientProperties();
+			client.setOauth2RegistrationId("  ");
+			InstanceProperties instance = new InstanceProperties();
+
+			assertThat(SpringBootAdminClientOAuth2AutoConfiguration.resolveRegistrationId(client, instance)).isNull();
+		}
+
 	}
 
 	@Nested
@@ -200,6 +221,40 @@ class SpringBootAdminClientOAuth2AutoConfigurationTest {
 
 			this.wireMock.verify(
 					postRequestedFor(urlEqualTo("/instances")).withHeader("Authorization", equalTo("Bearer my-token")));
+		}
+
+		@Test
+		void withOAuth2Manager_andBasicAuthConfigured_butNoOAuth2RegistrationId_usesBasicAuth() {
+			this.wireMock.stubFor(
+					post(urlEqualTo("/instances")).willReturn(created().withHeader("Content-Type", "application/json")
+						.withHeader("Location", this.wireMock.url("/instances/abc"))
+						.withBody("{ \"id\": \"abc\" }")));
+
+			// No oauth2RegistrationId set → production code falls back to Basic Auth
+			ClientProperties client = new ClientProperties();
+			client.setUsername("admin");
+			client.setPassword("secret");
+			InstanceProperties instance = new InstanceProperties();
+
+			@SuppressWarnings("unchecked")
+			ObjectProvider<JsonMapper> mapperProvider = mock(ObjectProvider.class);
+			OAuth2AuthorizedClientManager oAuth2Manager = mock(OAuth2AuthorizedClientManager.class);
+			RegistrationClient registrationClient = new SpringBootAdminClientOAuth2AutoConfiguration()
+				.oauth2RegistrationClient(client, instance, RestClient.builder(), oAuth2Manager, mapperProvider);
+
+			Application application = Application.create("test-app")
+				.managementUrl("http://localhost:8080/mgmt")
+				.healthUrl("http://localhost:8080/health")
+				.serviceUrl("http://localhost:8080")
+				.build();
+
+			registrationClient.register(this.wireMock.url("/instances"), application);
+
+			// Base64("admin:secret") = YWRtaW46c2VjcmV0
+			this.wireMock.verify(postRequestedFor(urlEqualTo("/instances")).withHeader("Authorization",
+					equalTo("Basic YWRtaW46c2VjcmV0")));
+			// OAuth2 manager must not be invoked when falling back to Basic Auth
+			verifyNoInteractions(oAuth2Manager);
 		}
 
 		private static OAuth2AuthorizedClientManager buildMockManager(String registrationId, String tokenValue) {

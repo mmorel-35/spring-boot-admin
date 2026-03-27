@@ -16,6 +16,7 @@
 
 package de.codecentric.boot.admin.client.config;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -25,9 +26,11 @@ import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.http.client.HttpClientSettings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.support.BasicAuthenticationInterceptor;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.web.client.OAuth2ClientHttpRequestInterceptor;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -52,6 +55,21 @@ import de.codecentric.boot.admin.client.registration.RestClientRegistrationClien
  * {@link SpringBootAdminClientAutoConfiguration.RestClientRegistrationClientConfig} —
  * connect/read timeouts, Jackson message-converter customization — is replicated here.
  * Basic Auth is intentionally omitted because OAuth2 takes precedence.
+ * <p>
+ * Authentication precedence when building the registration {@link RestClient}:
+ * <ol>
+ * <li>If a non-blank OAuth2 registration ID is resolved (via metadata or property), an
+ * {@link OAuth2ClientHttpRequestInterceptor} is added and OAuth2 Bearer tokens are used
+ * for all registration requests.</li>
+ * <li>If no OAuth2 registration ID is configured but
+ * {@code spring.boot.admin.client.username} and {@code password} are set, Basic Auth is
+ * used as a fallback — preserving the behaviour of
+ * {@link SpringBootAdminClientAutoConfiguration.RestClientRegistrationClientConfig}.</li>
+ * <li>If neither is configured, registration proceeds unauthenticated.</li>
+ * </ol>
+ * <p>
+ * Blank values (empty string, whitespace only) in metadata or the property are treated as
+ * absent and skipped.
  * <p>
  * Registration ID resolution order (highest priority first):
  * <ol>
@@ -84,8 +102,7 @@ import de.codecentric.boot.admin.client.registration.RestClientRegistrationClien
  *             oauth2.registration-id: my-other-client
  * </pre>
  *
- * If neither is configured, no token is injected and registration proceeds
- * unauthenticated.
+ * If neither is configured, registration proceeds unauthenticated.
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnClass(OAuth2AuthorizedClientManager.class)
@@ -110,21 +127,29 @@ public class SpringBootAdminClientOAuth2AutoConfiguration {
 			converters.add(new JacksonJsonHttpMessageConverter(mapper));
 		}));
 
-		var interceptor = new OAuth2ClientHttpRequestInterceptor(authorizedClientManager);
-		interceptor.setClientRegistrationIdResolver((request) -> resolveRegistrationId(client, instance));
-		restClientBuilder.requestInterceptor(interceptor);
+		String registrationId = resolveRegistrationId(client, instance);
+		if (StringUtils.hasText(registrationId)) {
+			var interceptor = new OAuth2ClientHttpRequestInterceptor(authorizedClientManager);
+			interceptor.setClientRegistrationIdResolver((request) -> resolveRegistrationId(client, instance));
+			restClientBuilder.requestInterceptor(interceptor);
+		}
+		else if (client.getUsername() != null && client.getPassword() != null) {
+			restClientBuilder
+				.requestInterceptor(new BasicAuthenticationInterceptor(client.getUsername(), client.getPassword()));
+		}
 
 		return new RestClientRegistrationClient(restClientBuilder.build());
 	}
 
-	static String resolveRegistrationId(ClientProperties client, InstanceProperties instance) {
+	@Nullable static String resolveRegistrationId(ClientProperties client, InstanceProperties instance) {
 		for (String key : REGISTRATION_ID_KEYS) {
 			String value = instance.getMetadata().get(key);
-			if (value != null) {
+			if (StringUtils.hasText(value)) {
 				return value;
 			}
 		}
-		return client.getOauth2RegistrationId();
+		String fromProperty = client.getOauth2RegistrationId();
+		return StringUtils.hasText(fromProperty) ? fromProperty : null;
 	}
 
 }

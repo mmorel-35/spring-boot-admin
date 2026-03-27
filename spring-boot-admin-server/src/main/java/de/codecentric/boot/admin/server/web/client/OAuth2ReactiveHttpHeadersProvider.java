@@ -26,6 +26,7 @@ import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.oauth2.client.OAuth2AuthorizeRequest;
 import org.springframework.security.oauth2.client.ReactiveOAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
+import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
 
 import de.codecentric.boot.admin.server.domain.entities.Instance;
@@ -94,14 +95,18 @@ public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersPro
 			return fromMetadata;
 		}
 		String serviceName = instance.getRegistration().getName();
-		return this.serviceRegistrationMap.getOrDefault(serviceName, this.defaultRegistrationId);
+		String fromServiceMap = this.serviceRegistrationMap.get(serviceName);
+		if (StringUtils.hasText(fromServiceMap)) {
+			return fromServiceMap;
+		}
+		return StringUtils.hasText(this.defaultRegistrationId) ? this.defaultRegistrationId : null;
 	}
 
 	@Nullable private static String getMetadataValue(Instance instance, String[] keys) {
 		Map<String, String> metadata = instance.getRegistration().getMetadata();
 		for (String key : keys) {
 			String value = metadata.get(key);
-			if (value != null) {
+			if (StringUtils.hasText(value)) {
 				return value;
 			}
 		}
