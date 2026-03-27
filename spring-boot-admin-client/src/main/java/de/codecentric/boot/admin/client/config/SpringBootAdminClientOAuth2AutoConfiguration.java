@@ -23,10 +23,13 @@ import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.http.client.HttpClientSettings;
 import org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.support.BasicAuthenticationInterceptor;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
@@ -106,10 +109,13 @@ import de.codecentric.boot.admin.client.registration.RestClientRegistrationClien
  * If neither is configured, registration proceeds unauthenticated.
  */
 @Configuration(proxyBeanMethods = false)
+@ConditionalOnWebApplication
+@Conditional(SpringBootAdminClientEnabledCondition.class)
 @ConditionalOnClass(OAuth2AuthorizedClientManager.class)
 @ConditionalOnBean(OAuth2AuthorizedClientManager.class)
 @AutoConfigureAfter(RestClientAutoConfiguration.class)
 @AutoConfigureBefore(SpringBootAdminClientAutoConfiguration.class)
+@EnableConfigurationProperties({ ClientProperties.class, InstanceProperties.class })
 public class SpringBootAdminClientOAuth2AutoConfiguration {
 
 	private static final String[] REGISTRATION_ID_KEYS = { "oauth2.registration-id", "oauth2-registration-id" };
@@ -120,15 +126,7 @@ public class SpringBootAdminClientOAuth2AutoConfiguration {
 	public RegistrationClient oauth2RegistrationClient(ClientProperties client, InstanceProperties instance,
 			RestClient.Builder restClientBuilder, OAuth2AuthorizedClientManager authorizedClientManager,
 			ObjectProvider<JsonMapper> objectMapper) {
-		var factorySettings = HttpClientSettings.defaults()
-			.withConnectTimeout(client.getConnectTimeout())
-			.withReadTimeout(client.getReadTimeout());
-		restClientBuilder.requestFactory(ClientHttpRequestFactoryBuilder.detect().build(factorySettings));
-
-		objectMapper.ifAvailable((mapper) -> restClientBuilder.messageConverters((converters) -> {
-			converters.removeIf(JacksonJsonHttpMessageConverter.class::isInstance);
-			converters.add(new JacksonJsonHttpMessageConverter(mapper));
-		}));
+		customizeRestClientBuilder(restClientBuilder, client, objectMapper);
 
 		String registrationId = resolveRegistrationId(client, instance);
 		if (StringUtils.hasText(registrationId)) {
@@ -142,6 +140,18 @@ public class SpringBootAdminClientOAuth2AutoConfiguration {
 		}
 
 		return new RestClientRegistrationClient(restClientBuilder.build());
+	}
+
+	private static void customizeRestClientBuilder(RestClient.Builder restClientBuilder, ClientProperties client,
+			ObjectProvider<JsonMapper> objectMapper) {
+		var factorySettings = HttpClientSettings.defaults()
+			.withConnectTimeout(client.getConnectTimeout())
+			.withReadTimeout(client.getReadTimeout());
+		restClientBuilder.requestFactory(ClientHttpRequestFactoryBuilder.detect().build(factorySettings));
+		objectMapper.ifAvailable((mapper) -> restClientBuilder.messageConverters((converters) -> {
+			converters.removeIf(JacksonJsonHttpMessageConverter.class::isInstance);
+			converters.add(new JacksonJsonHttpMessageConverter(mapper));
+		}));
 	}
 
 	@Nullable static String resolveRegistrationId(ClientProperties client, InstanceProperties instance) {

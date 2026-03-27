@@ -22,14 +22,12 @@ import java.util.List;
 import org.reactivestreams.Publisher;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Scope;
 import org.springframework.core.annotation.Order;
-import org.springframework.security.oauth2.client.ReactiveOAuth2AuthorizedClientManager;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import de.codecentric.boot.admin.server.domain.events.InstanceEvent;
@@ -42,7 +40,6 @@ import de.codecentric.boot.admin.server.web.client.InstanceWebClient;
 import de.codecentric.boot.admin.server.web.client.InstanceWebClientCustomizer;
 import de.codecentric.boot.admin.server.web.client.LegacyEndpointConverter;
 import de.codecentric.boot.admin.server.web.client.LegacyEndpointConverters;
-import de.codecentric.boot.admin.server.web.client.OAuth2ReactiveHttpHeadersProvider;
 import de.codecentric.boot.admin.server.web.client.cookies.CookieStoreCleanupTrigger;
 import de.codecentric.boot.admin.server.web.client.cookies.JdkPerInstanceCookieStore;
 import de.codecentric.boot.admin.server.web.client.cookies.PerInstanceCookieStore;
@@ -176,26 +173,6 @@ public class AdminServerInstanceWebClientConfiguration {
 			else {
 				return new BasicAuthHttpHeaderProvider();
 			}
-		}
-
-		@Configuration(proxyBeanMethods = false)
-		@ConditionalOnClass(ReactiveOAuth2AuthorizedClientManager.class)
-		@ConditionalOnBean(ReactiveOAuth2AuthorizedClientManager.class)
-		protected static class OAuth2HttpHeadersProviderConfiguration {
-
-			@Bean
-			@ConditionalOnMissingBean(OAuth2ReactiveHttpHeadersProvider.class)
-			public OAuth2ReactiveHttpHeadersProvider oauth2ReactiveHttpHeadersProvider(
-					ReactiveOAuth2AuthorizedClientManager manager, AdminServerProperties properties) {
-				AdminServerProperties.InstanceAuthProperties instanceAuth = properties.getInstanceAuth();
-				AdminServerProperties.InstanceOAuth2Properties oauth2 = instanceAuth.getOauth2();
-				if (instanceAuth.isEnabled()) {
-					return new OAuth2ReactiveHttpHeadersProvider(manager, oauth2.getDefaultRegistrationId(),
-							oauth2.getServiceMap());
-				}
-				return new OAuth2ReactiveHttpHeadersProvider(manager);
-			}
-
 		}
 
 	}

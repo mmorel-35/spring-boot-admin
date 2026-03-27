@@ -48,6 +48,17 @@ import de.codecentric.boot.admin.server.web.client.reactive.ReactiveHttpHeadersP
  * <li>Default registration ID</li>
  * <li>No-op (returns empty headers) if none of the above is configured</li>
  * </ol>
+ *
+ * <p>
+ * <strong>Trust model:</strong> Instance metadata is supplied by the registering client
+ * application. In a multi-tenant or untrusted-registration environment a malicious client
+ * could set the {@code oauth2.registration-id} metadata key to any value, causing the
+ * server to use a different OAuth2 client registration (and therefore different
+ * credentials) when polling that instance. Only deploy this provider in environments
+ * where you trust all registered clients, or restrict metadata-supplied registration IDs
+ * to known values via the {@code service-map} and {@code default-registration-id}
+ * properties (which are under server-side control) by disabling the metadata-key
+ * override.
  */
 public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersProvider {
 
