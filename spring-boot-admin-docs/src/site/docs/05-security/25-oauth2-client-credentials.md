@@ -52,6 +52,9 @@ implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
 
 ### Configuration
 
+The registration ID is provided via the instance metadata key `oauth2.registration-id` — the same key the
+server reads when polling actuator endpoints, keeping configuration consistent in both directions:
+
 ```yaml title="application.yml"
 spring:
   security:
@@ -70,22 +73,25 @@ spring:
     admin:
       client:
         url: http://admin-server:8080
-        # Reference the registration ID above
-        oauth2-client-registration-id: sba-client
+        instance:
+          metadata:
+            # Registration ID used both for authenticating against the SBA server
+            # and for the server when polling this instance's actuator endpoints
+            oauth2.registration-id: sba-client
 ```
 
 :::note
-When `oauth2-client-registration-id` is set, Basic Auth (`username` / `password`) is ignored for the registration
-request. The two mechanisms are mutually exclusive.
+When `oauth2.registration-id` is present in instance metadata, Basic Auth (`username` / `password`) is ignored for
+the registration request. The two mechanisms are mutually exclusive.
 :::
 
 ### How It Works
 
 When `spring-security-oauth2-client` is on the classpath and an `OAuth2AuthorizedClientManager` bean is present in
 the context, Spring Boot Admin auto-configures an `OAuth2ClientHttpRequestInterceptor` on the registration
-`RestClient`. The interceptor obtains (and caches/refreshes) a Bearer token from your Authorization Server using
-the configured `client_credentials` grant, then attaches it as an `Authorization: Bearer <token>` header on every
-registration request.
+`RestClient`. The interceptor resolves the registration ID from the `oauth2.registration-id` metadata key, obtains
+(and caches/refreshes) a Bearer token from your Authorization Server using the configured `client_credentials`
+grant, then attaches it as an `Authorization: Bearer <token>` header on every registration request.
 
 ---
 
@@ -147,19 +153,34 @@ the existing `BasicAuthHttpHeaderProvider`. If both are active, both sets of hea
 mechanism per environment to avoid conflicts.
 :::
 
-### Per-Service Registration IDs
+### Registration ID Resolution Order
 
-The `service-map` key is the service name as registered in Spring Boot Admin (usually `spring.application.name`).
-Values in `service-map` take precedence over `default-registration-id`.
+The registration ID is resolved in the following priority order (highest first):
 
-If neither a service-specific override nor a default registration ID is configured for an instance, no OAuth2 header
-is added for that instance.
+1. **Instance metadata** key `oauth2.registration-id` (or `oauth2-registration-id`) — the client
+   instance sets its own registration ID in its metadata:
+
+   ```yaml title="client application.yml"
+   spring:
+     boot:
+       admin:
+         client:
+           instance:
+             metadata:
+               oauth2.registration-id: my-instance-client
+   ```
+
+2. **`service-map`** — server-side per-service override keyed by `spring.application.name`
+3. **`default-registration-id`** — server-side fallback for all instances
+
+If none of the above yields a registration ID for an instance, no OAuth2 header is added for that instance.
 
 ---
 
 ## Combined Example
 
-Below is a minimal end-to-end example where both client registration and instance polling use OAuth2:
+Below is a minimal end-to-end example where both client registration and instance polling use OAuth2.
+Note that a single `oauth2.registration-id` metadata entry covers both directions:
 
 ### Client (`payment-service`)
 
@@ -184,7 +205,10 @@ spring:
     admin:
       client:
         url: https://admin.company.com
-        oauth2-client-registration-id: sba-registration
+        instance:
+          metadata:
+            # Used by the client when registering AND by the server when polling actuators
+            oauth2.registration-id: sba-registration
 ```
 
 ### Server (`spring-boot-admin`)

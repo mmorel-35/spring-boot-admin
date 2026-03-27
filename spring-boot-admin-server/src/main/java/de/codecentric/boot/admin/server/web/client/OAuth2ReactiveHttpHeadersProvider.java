@@ -36,13 +36,17 @@ import de.codecentric.boot.admin.server.web.client.reactive.ReactiveHttpHeadersP
  * <p>
  * Resolution order for the registration ID:
  * <ol>
+ * <li>Instance metadata key {@code "oauth2.registration-id"} (also accepted:
+ * {@code "oauth2-registration-id"})</li>
  * <li>Per-service override via {@code serviceRegistrationMap} (keyed by
  * {@link de.codecentric.boot.admin.server.domain.values.Registration#getName()})</li>
  * <li>Default registration ID</li>
- * <li>No-op (returns empty headers) if neither is configured</li>
+ * <li>No-op (returns empty headers) if none of the above is configured</li>
  * </ol>
  */
 public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersProvider {
+
+	private static final String[] REGISTRATION_ID_KEYS = { "oauth2.registration-id", "oauth2-registration-id" };
 
 	private static final String SBA_SERVER_PRINCIPAL = "spring-boot-admin-server";
 
@@ -80,8 +84,23 @@ public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersPro
 	}
 
 	@Nullable private String resolveRegistrationId(Instance instance) {
+		String fromMetadata = getMetadataValue(instance, REGISTRATION_ID_KEYS);
+		if (fromMetadata != null) {
+			return fromMetadata;
+		}
 		String serviceName = instance.getRegistration().getName();
 		return this.serviceRegistrationMap.getOrDefault(serviceName, this.defaultRegistrationId);
+	}
+
+	@Nullable private static String getMetadataValue(Instance instance, String[] keys) {
+		Map<String, String> metadata = instance.getRegistration().getMetadata();
+		for (String key : keys) {
+			String value = metadata.get(key);
+			if (value != null) {
+				return value;
+			}
+		}
+		return null;
 	}
 
 }

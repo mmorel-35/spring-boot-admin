@@ -46,6 +46,40 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 			ReactiveOAuth2AuthorizedClientManager.class);
 
 	@Test
+	void metadataRegistrationIdTakesPrecedenceOverServiceMapAndDefault() {
+		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("metadata-client", "metadata-token");
+		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
+			.thenReturn(Mono.just(authorizedClient));
+
+		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
+				"default-client", Collections.singletonMap("my-service", "service-client"));
+
+		Instance instance = buildInstanceWithMetadata("my-service", "oauth2.registration-id", "metadata-client");
+
+		StepVerifier.create(provider.getHeaders(instance))
+			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
+				.isEqualTo("Bearer metadata-token"))
+			.verifyComplete();
+	}
+
+	@Test
+	void metadataRegistrationIdWithDashKeyIsAccepted() {
+		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("dash-client", "dash-token");
+		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
+			.thenReturn(Mono.just(authorizedClient));
+
+		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
+				"default-client", Collections.emptyMap());
+
+		Instance instance = buildInstanceWithMetadata("some-service", "oauth2-registration-id", "dash-client");
+
+		StepVerifier.create(provider.getHeaders(instance))
+			.assertNext(
+					(headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer dash-token"))
+			.verifyComplete();
+	}
+
+	@Test
 	void defaultRegistrationIdIsUsed_whenNoServiceOverrideExists() {
 		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("default-client", "test-token-value");
 		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
@@ -125,6 +159,14 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 
 	private static Instance buildInstance(String serviceName) {
 		Registration registration = Registration.create(serviceName, "https://health").name(serviceName).build();
+		return Instance.create(InstanceId.of("id")).register(registration);
+	}
+
+	private static Instance buildInstanceWithMetadata(String serviceName, String metadataKey, String metadataValue) {
+		Registration registration = Registration.create(serviceName, "https://health")
+			.name(serviceName)
+			.metadata(metadataKey, metadataValue)
+			.build();
 		return Instance.create(InstanceId.of("id")).register(registration);
 	}
 

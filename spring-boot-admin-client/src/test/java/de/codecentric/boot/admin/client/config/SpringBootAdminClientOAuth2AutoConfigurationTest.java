@@ -40,7 +40,7 @@ class SpringBootAdminClientOAuth2AutoConfigurationTest {
 				SpringBootAdminClientOAuth2AutoConfiguration.class))
 		.withBean(RestClient.Builder.class, RestClient::builder)
 		.withPropertyValues("spring.boot.admin.client.url:http://localhost:8081",
-				"spring.boot.admin.client.oauth2-client-registration-id:my-client")
+				"spring.boot.admin.client.instance.metadata.oauth2.registration-id:my-client")
 		.withInitializer(new ConditionEvaluationReportLoggingListener());
 
 	@Test
