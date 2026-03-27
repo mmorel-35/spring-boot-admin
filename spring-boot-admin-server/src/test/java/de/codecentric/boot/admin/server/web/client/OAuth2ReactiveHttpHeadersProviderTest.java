@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.oauth2.client.OAuth2AuthorizeRequest;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
@@ -38,6 +39,7 @@ import de.codecentric.boot.admin.server.domain.values.Registration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class OAuth2ReactiveHttpHeadersProviderTest {
@@ -60,6 +62,10 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
 				.isEqualTo("Bearer metadata-token"))
 			.verifyComplete();
+
+		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
+		verify(this.authorizedClientManager).authorize(captor.capture());
+		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("metadata-client");
 	}
 
 	@Test
@@ -77,6 +83,10 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 			.assertNext(
 					(headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer dash-token"))
 			.verifyComplete();
+
+		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
+		verify(this.authorizedClientManager).authorize(captor.capture());
+		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("dash-client");
 	}
 
 	@Test
@@ -94,6 +104,10 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
 				.isEqualTo("Bearer test-token-value"))
 			.verifyComplete();
+
+		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
+		verify(this.authorizedClientManager).authorize(captor.capture());
+		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("default-client");
 	}
 
 	@Test
@@ -111,6 +125,10 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
 				.isEqualTo("Bearer service-token-value"))
 			.verifyComplete();
+
+		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
+		verify(this.authorizedClientManager).authorize(captor.capture());
+		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("service-client");
 	}
 
 	@Test
@@ -137,6 +155,10 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 		StepVerifier.create(provider.getHeaders(instance))
 			.assertNext((headers) -> assertThat(headers.toSingleValueMap()).isEmpty())
 			.verifyComplete();
+
+		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
+		verify(this.authorizedClientManager).authorize(captor.capture());
+		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("default-client");
 	}
 
 	@Test
@@ -155,6 +177,10 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
 				.isEqualTo("Bearer specific-token"))
 			.verifyComplete();
+
+		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
+		verify(this.authorizedClientManager).authorize(captor.capture());
+		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("specific-client");
 	}
 
 	private static Instance buildInstance(String serviceName) {

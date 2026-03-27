@@ -20,6 +20,9 @@ import java.util.Map;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.oauth2.client.OAuth2AuthorizeRequest;
 import org.springframework.security.oauth2.client.ReactiveOAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
@@ -48,7 +51,9 @@ public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersPro
 
 	private static final String[] REGISTRATION_ID_KEYS = { "oauth2.registration-id", "oauth2-registration-id" };
 
-	private static final String SBA_SERVER_PRINCIPAL = "spring-boot-admin-server";
+	private static final Authentication SBA_SERVER_PRINCIPAL = new AnonymousAuthenticationToken(
+			"spring-boot-admin-server", "spring-boot-admin-server",
+			AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS"));
 
 	private final ReactiveOAuth2AuthorizedClientManager authorizedClientManager;
 

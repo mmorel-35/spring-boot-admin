@@ -16,6 +16,13 @@
 
 package de.codecentric.boot.admin.client.config;
 
+import java.time.Instant;
+
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.common.ConsoleNotifier;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.actuate.autoconfigure.endpoint.EndpointAutoConfiguration;
 import org.springframework.boot.actuate.autoconfigure.endpoint.web.WebEndpointAutoConfiguration;
@@ -23,75 +30,193 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.logging.ConditionEvaluationReportLoggingListener;
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.boot.webmvc.autoconfigure.DispatcherServletAutoConfiguration;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.registration.ClientRegistration;
+import org.springframework.security.oauth2.client.web.client.OAuth2ClientHttpRequestInterceptor;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.web.client.RestClient;
 
+import de.codecentric.boot.admin.client.registration.Application;
 import de.codecentric.boot.admin.client.registration.RegistrationClient;
 import de.codecentric.boot.admin.client.registration.RestClientRegistrationClient;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.created;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class SpringBootAdminClientOAuth2AutoConfigurationTest {
 
-	private final WebApplicationContextRunner contextRunner = new WebApplicationContextRunner()
-		.withConfiguration(AutoConfigurations.of(EndpointAutoConfiguration.class, WebEndpointAutoConfiguration.class,
-				DispatcherServletAutoConfiguration.class, SpringBootAdminClientAutoConfiguration.class,
-				SpringBootAdminClientOAuth2AutoConfiguration.class))
-		.withBean(RestClient.Builder.class, RestClient::builder)
-		.withPropertyValues("spring.boot.admin.client.url:http://localhost:8081")
-		.withInitializer(new ConditionEvaluationReportLoggingListener());
+	@Nested
+	class AutoConfigurationConditionsTest {
 
-	@Test
-	void withoutOAuth2AuthorizedClientManager_usesDefaultRegistrationClient() {
-		this.contextRunner.run((context) -> {
-			assertThat(context).hasSingleBean(RegistrationClient.class);
-			assertThat(context.getBean(RegistrationClient.class)).isInstanceOf(RestClientRegistrationClient.class);
-		});
-	}
+		private final WebApplicationContextRunner contextRunner = new WebApplicationContextRunner()
+			.withConfiguration(AutoConfigurations.of(EndpointAutoConfiguration.class,
+					WebEndpointAutoConfiguration.class, DispatcherServletAutoConfiguration.class,
+					SpringBootAdminClientAutoConfiguration.class, SpringBootAdminClientOAuth2AutoConfiguration.class))
+			.withBean(RestClient.Builder.class, RestClient::builder)
+			.withPropertyValues("spring.boot.admin.client.url:http://localhost:8081")
+			.withInitializer(new ConditionEvaluationReportLoggingListener());
 
-	@Test
-	void withOAuth2AuthorizedClientManager_usesOAuth2RegistrationClient() {
-		this.contextRunner
-			.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
-			.run((context) -> {
+		@Test
+		void withoutOAuth2AuthorizedClientManager_usesDefaultRegistrationClient() {
+			this.contextRunner.run((context) -> {
 				assertThat(context).hasSingleBean(RegistrationClient.class);
 				assertThat(context.getBean(RegistrationClient.class)).isInstanceOf(RestClientRegistrationClient.class);
 			});
+		}
+
+		@Test
+		void withOAuth2AuthorizedClientManager_usesOAuth2RegistrationClient() {
+			this.contextRunner
+				.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
+				.run((context) -> {
+					assertThat(context).hasSingleBean(RegistrationClient.class);
+					assertThat(context.getBean(RegistrationClient.class))
+						.isInstanceOf(RestClientRegistrationClient.class);
+				});
+		}
+
+		@Test
+		void withDefaultOAuth2RegistrationId_autoConfiguresWithoutMetadata() {
+			this.contextRunner.withPropertyValues("spring.boot.admin.client.oauth2-registration-id:default-client")
+				.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
+				.run((context) -> {
+					assertThat(context).hasSingleBean(RegistrationClient.class);
+					assertThat(context.getBean(RegistrationClient.class))
+						.isInstanceOf(RestClientRegistrationClient.class);
+				});
+		}
+
+		@Test
+		void withCustomRegistrationClientBean_conditionalOnMissingBeanRespected() {
+			RegistrationClient customClient = mock(RegistrationClient.class);
+			this.contextRunner
+				.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
+				.withBean(RegistrationClient.class, () -> customClient)
+				.run((context) -> {
+					assertThat(context).hasSingleBean(RegistrationClient.class);
+					assertThat(context.getBean(RegistrationClient.class)).isSameAs(customClient);
+				});
+		}
+
 	}
 
-	@Test
-	void withDefaultOAuth2RegistrationId_autoConfiguresWithoutMetadata() {
-		this.contextRunner.withPropertyValues("spring.boot.admin.client.oauth2-registration-id:default-client")
-			.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
-			.run((context) -> {
-				assertThat(context).hasSingleBean(RegistrationClient.class);
-				assertThat(context.getBean(RegistrationClient.class)).isInstanceOf(RestClientRegistrationClient.class);
-			});
+	@Nested
+	class RegistrationIdResolutionTest {
+
+		@Test
+		void defaultPropertyIsUsed_whenNoMetadata() {
+			ClientProperties client = new ClientProperties();
+			client.setOauth2RegistrationId("default-client");
+			InstanceProperties instance = new InstanceProperties();
+
+			assertThat(SpringBootAdminClientOAuth2AutoConfiguration.resolveRegistrationId(client, instance))
+				.isEqualTo("default-client");
+		}
+
+		@Test
+		void metadataDotKeyTakesPrecedenceOverDefaultProperty() {
+			ClientProperties client = new ClientProperties();
+			client.setOauth2RegistrationId("default-client");
+			InstanceProperties instance = new InstanceProperties();
+			instance.getMetadata().put("oauth2.registration-id", "meta-client");
+
+			assertThat(SpringBootAdminClientOAuth2AutoConfiguration.resolveRegistrationId(client, instance))
+				.isEqualTo("meta-client");
+		}
+
+		@Test
+		void metadataDashKeyTakesPrecedenceOverDefaultProperty() {
+			ClientProperties client = new ClientProperties();
+			client.setOauth2RegistrationId("default-client");
+			InstanceProperties instance = new InstanceProperties();
+			instance.getMetadata().put("oauth2-registration-id", "dash-client");
+
+			assertThat(SpringBootAdminClientOAuth2AutoConfiguration.resolveRegistrationId(client, instance))
+				.isEqualTo("dash-client");
+		}
+
+		@Test
+		void nullReturnedWhenNeitherMetadataNorDefaultSet() {
+			assertThat(SpringBootAdminClientOAuth2AutoConfiguration.resolveRegistrationId(new ClientProperties(),
+					new InstanceProperties()))
+				.isNull();
+		}
+
 	}
 
-	@Test
-	void metadataRegistrationIdOverridesDefaultProperty() {
-		this.contextRunner
-			.withPropertyValues("spring.boot.admin.client.oauth2-registration-id:default-client",
-					"spring.boot.admin.client.instance.metadata.oauth2.registration-id:override-client")
-			.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
-			.run((context) -> {
-				assertThat(context).hasSingleBean(RegistrationClient.class);
-				assertThat(context.getBean(RegistrationClient.class)).isInstanceOf(RestClientRegistrationClient.class);
-			});
-	}
+	@Nested
+	class BearerTokenSentTest {
 
-	@Test
-	void withCustomRegistrationClientBean_conditionalOnMissingBeanRespected() {
-		RegistrationClient customClient = mock(RegistrationClient.class);
-		this.contextRunner
-			.withBean(OAuth2AuthorizedClientManager.class, () -> mock(OAuth2AuthorizedClientManager.class))
-			.withBean(RegistrationClient.class, () -> customClient)
-			.run((context) -> {
-				assertThat(context).hasSingleBean(RegistrationClient.class);
-				assertThat(context.getBean(RegistrationClient.class)).isSameAs(customClient);
-			});
+		private final WireMockServer wireMock = new WireMockServer(
+				options().dynamicPort().notifier(new ConsoleNotifier(false)));
+
+		@BeforeEach
+		void startWireMock() {
+			this.wireMock.start();
+		}
+
+		@AfterEach
+		void stopWireMock() {
+			this.wireMock.stop();
+		}
+
+		@Test
+		void registrationRequestIncludesBearerToken() {
+			this.wireMock.stubFor(
+					post(urlEqualTo("/instances")).willReturn(created().withHeader("Content-Type", "application/json")
+						.withHeader("Location", this.wireMock.url("/instances/abc"))
+						.withBody("{ \"id\": \"abc\" }")));
+
+			OAuth2AuthorizedClientManager manager = buildMockManager("test-client", "my-token");
+
+			ClientProperties client = new ClientProperties();
+			client.setOauth2RegistrationId("test-client");
+			InstanceProperties instance = new InstanceProperties();
+
+			var interceptor = new OAuth2ClientHttpRequestInterceptor(manager);
+			interceptor.setClientRegistrationIdResolver(
+					(req) -> SpringBootAdminClientOAuth2AutoConfiguration.resolveRegistrationId(client, instance));
+
+			RestClient restClient = RestClient.builder().requestInterceptor(interceptor).build();
+			RegistrationClient registrationClient = new RestClientRegistrationClient(restClient);
+
+			Application application = Application.create("test-app")
+				.managementUrl("http://localhost:8080/mgmt")
+				.healthUrl("http://localhost:8080/health")
+				.serviceUrl("http://localhost:8080")
+				.build();
+
+			registrationClient.register(this.wireMock.url("/instances"), application);
+
+			this.wireMock.verify(
+					postRequestedFor(urlEqualTo("/instances")).withHeader("Authorization", equalTo("Bearer my-token")));
+		}
+
+		private static OAuth2AuthorizedClientManager buildMockManager(String registrationId, String tokenValue) {
+			ClientRegistration reg = ClientRegistration.withRegistrationId(registrationId)
+				.authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+				.clientId("cid")
+				.tokenUri("https://token-uri")
+				.build();
+			OAuth2AccessToken token = new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER, tokenValue,
+					Instant.now(), Instant.now().plusSeconds(300));
+			OAuth2AuthorizedClient authorizedClient = new OAuth2AuthorizedClient(reg, "sba-server", token);
+
+			OAuth2AuthorizedClientManager manager = mock(OAuth2AuthorizedClientManager.class);
+			when(manager.authorize(any())).thenReturn(authorizedClient);
+			return manager;
+		}
+
 	}
 
 }
