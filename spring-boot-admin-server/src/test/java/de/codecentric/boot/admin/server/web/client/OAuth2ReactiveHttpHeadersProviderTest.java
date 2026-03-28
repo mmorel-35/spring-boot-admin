@@ -40,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class OAuth2ReactiveHttpHeadersProviderTest {
@@ -198,6 +199,18 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 		StepVerifier.create(provider.getHeaders(buildInstance("some-service")))
 			.assertNext((headers) -> assertThat(headers.toSingleValueMap()).isEmpty())
 			.verifyComplete();
+	}
+
+	@Test
+	void emptyHeadersReturnedWhenResolverReturnsBlankRegistrationId() {
+		OAuth2RegistrationIdResolver blankResolver = (instance) -> "   ";
+		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
+				blankResolver);
+
+		StepVerifier.create(provider.getHeaders(buildInstance("some-service")))
+			.assertNext((headers) -> assertThat(headers.toSingleValueMap()).isEmpty())
+			.verifyComplete();
+		verifyNoInteractions(this.authorizedClientManager);
 	}
 
 	@Test

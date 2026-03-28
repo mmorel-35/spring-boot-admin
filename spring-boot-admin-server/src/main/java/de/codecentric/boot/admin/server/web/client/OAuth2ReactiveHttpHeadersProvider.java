@@ -103,7 +103,7 @@ public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersPro
 	@Override
 	public Mono<HttpHeaders> getHeaders(Instance instance) {
 		String registrationId = this.registrationIdResolver.resolve(instance);
-		if (registrationId == null) {
+		if (!StringUtils.hasText(registrationId)) {
 			return Mono.just(HttpHeaders.EMPTY);
 		}
 		var request = OAuth2AuthorizeRequest.withClientRegistrationId(registrationId)
