@@ -206,21 +206,28 @@ Instance metadata is controlled by the registering client application. In multi-
 untrusted-registration environments, a malicious client could set `oauth2.registration-id` to any value
 and cause the server to send an OAuth2 token obtained with different credentials to that instance.
 
-To prevent this, set `allow-metadata-override: false` — the server will then ignore the metadata key
-entirely and use only `service-map` / `default-registration-id`:
+To prevent this, provide a custom `OAuth2RegistrationIdResolver` bean that does not read instance metadata.
+Spring Boot Admin auto-configuration exposes both the resolver and the provider as
+`@ConditionalOnMissingBean` components, so you can replace either individually without touching the other.
 
-```yaml title="server application.yml"
-spring:
-  boot:
-    admin:
-      instance-auth:
-        oauth2:
-          allow-metadata-override: false   # secure-by-default in untrusted environments
-          default-registration-id: instances-client
-          service-map:
-            payment-service: payment-service-client
+**Minimal example — fixed resolver that ignores metadata:**
+
+```java
+@Bean
+OAuth2RegistrationIdResolver oauth2RegistrationIdResolver(AdminServerProperties properties) {
+    // Skip metadata lookup; rely solely on service-map and default-registration-id
+    AdminServerProperties.InstanceOAuth2Properties oauth2 = properties.getInstanceAuth().getOauth2();
+    Map<String, String> serviceMap = oauth2.getServiceMap();
+    String defaultId = oauth2.getDefaultRegistrationId();
+    return instance -> {
+        String fromService = serviceMap.get(instance.getRegistration().getName());
+        if (StringUtils.hasText(fromService)) return fromService;
+        return StringUtils.hasText(defaultId) ? defaultId : null;
+    };
+}
 ```
 :::
+
 
 ---
 

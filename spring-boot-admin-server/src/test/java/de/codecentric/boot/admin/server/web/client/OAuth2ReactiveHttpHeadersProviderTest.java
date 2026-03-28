@@ -47,14 +47,90 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 	private final ReactiveOAuth2AuthorizedClientManager authorizedClientManager = mock(
 			ReactiveOAuth2AuthorizedClientManager.class);
 
+	// ---------------------------------------------------------------------------
+	// Tests for the provider itself (resolver → Bearer token header)
+	// ---------------------------------------------------------------------------
+
+	@Test
+	void whenResolverReturnsId_returnsAuthorizationHeader() {
+		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("my-client", "my-token");
+		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
+			.thenReturn(Mono.just(authorizedClient));
+
+		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
+				(instance) -> "my-client");
+
+		StepVerifier.create(provider.getHeaders(buildInstance("any-service")))
+			.assertNext(
+					(headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer my-token"))
+			.verifyComplete();
+
+		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
+		verify(this.authorizedClientManager).authorize(captor.capture());
+		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("my-client");
+	}
+
+	@Test
+	void whenResolverReturnsNull_returnsEmptyHeaders() {
+		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
+				(instance) -> null);
+
+		StepVerifier.create(provider.getHeaders(buildInstance("any-service")))
+			.assertNext((headers) -> assertThat(headers.toSingleValueMap()).isEmpty())
+			.verifyComplete();
+	}
+
+	@Test
+	void whenManagerReturnsEmpty_returnsEmptyHeaders() {
+		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class))).thenReturn(Mono.empty());
+
+		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
+				(instance) -> "my-client");
+
+		StepVerifier.create(provider.getHeaders(buildInstance("any-service")))
+			.assertNext((headers) -> assertThat(headers.toSingleValueMap()).isEmpty())
+			.verifyComplete();
+	}
+
+	// ---------------------------------------------------------------------------
+	// Tests for metadataRegistrationIdResolver()
+	// ---------------------------------------------------------------------------
+
+	@Test
+	void metadataResolver_readsDotKey() {
+		Instance instance = buildInstanceWithMetadata("svc", "oauth2.registration-id", "dot-client");
+		assertThat(OAuth2ReactiveHttpHeadersProvider.metadataRegistrationIdResolver().resolve(instance))
+			.isEqualTo("dot-client");
+	}
+
+	@Test
+	void metadataResolver_readsDashKey() {
+		Instance instance = buildInstanceWithMetadata("svc", "oauth2-registration-id", "dash-client");
+		assertThat(OAuth2ReactiveHttpHeadersProvider.metadataRegistrationIdResolver().resolve(instance))
+			.isEqualTo("dash-client");
+	}
+
+	@Test
+	void metadataResolver_returnsNullWhenNoMetadata() {
+		Instance instance = buildInstance("svc");
+		assertThat(OAuth2ReactiveHttpHeadersProvider.metadataRegistrationIdResolver().resolve(instance)).isNull();
+	}
+
+	// ---------------------------------------------------------------------------
+	// Tests for resolver chains composed with andThen()
+	// ---------------------------------------------------------------------------
+
 	@Test
 	void metadataRegistrationIdTakesPrecedenceOverServiceMapAndDefault() {
 		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("metadata-client", "metadata-token");
 		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
 			.thenReturn(Mono.just(authorizedClient));
 
+		Map<String, String> serviceMap = Collections.singletonMap("my-service", "service-client");
+		String defaultId = "default-client";
+		OAuth2RegistrationIdResolver resolver = chainResolver(defaultId, serviceMap);
 		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
-				"default-client", Collections.singletonMap("my-service", "service-client"));
+				resolver);
 
 		Instance instance = buildInstanceWithMetadata("my-service", "oauth2.registration-id", "metadata-client");
 
@@ -69,61 +145,21 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 	}
 
 	@Test
-	void metadataRegistrationIdWithDashKeyIsAccepted() {
-		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("dash-client", "dash-token");
-		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
-			.thenReturn(Mono.just(authorizedClient));
-
-		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
-				"default-client", Collections.emptyMap());
-
-		Instance instance = buildInstanceWithMetadata("some-service", "oauth2-registration-id", "dash-client");
-
-		StepVerifier.create(provider.getHeaders(instance))
-			.assertNext(
-					(headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer dash-token"))
-			.verifyComplete();
-
-		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
-		verify(this.authorizedClientManager).authorize(captor.capture());
-		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("dash-client");
-	}
-
-	@Test
-	void defaultRegistrationIdIsUsed_whenNoServiceOverrideExists() {
-		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("default-client", "test-token-value");
-		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
-			.thenReturn(Mono.just(authorizedClient));
-
-		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
-				"default-client", Collections.emptyMap());
-
-		Instance instance = buildInstance("some-service");
-
-		StepVerifier.create(provider.getHeaders(instance))
-			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
-				.isEqualTo("Bearer test-token-value"))
-			.verifyComplete();
-
-		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
-		verify(this.authorizedClientManager).authorize(captor.capture());
-		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("default-client");
-	}
-
-	@Test
 	void serviceSpecificRegistrationIdTakesPrecedenceOverDefault() {
-		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("service-client", "service-token-value");
+		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("service-client", "service-token");
 		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
 			.thenReturn(Mono.just(authorizedClient));
 
+		Map<String, String> serviceMap = Collections.singletonMap("my-service", "service-client");
+		OAuth2RegistrationIdResolver resolver = chainResolver("default-client", serviceMap);
 		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
-				"default-client", Collections.singletonMap("my-service", "service-client"));
+				resolver);
 
 		Instance instance = buildInstance("my-service");
 
 		StepVerifier.create(provider.getHeaders(instance))
 			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
-				.isEqualTo("Bearer service-token-value"))
+				.isEqualTo("Bearer service-token"))
 			.verifyComplete();
 
 		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
@@ -132,67 +168,16 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 	}
 
 	@Test
-	void emptyHeadersReturnedWhenNoRegistrationIdConfigured() {
-		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
-				null, Collections.emptyMap());
-
-		Instance instance = buildInstance("some-service");
-
-		StepVerifier.create(provider.getHeaders(instance))
-			.assertNext((headers) -> assertThat(headers.toSingleValueMap()).isEmpty())
-			.verifyComplete();
-	}
-
-	@Test
-	void emptyHeadersReturnedWhenAuthorizedClientManagerReturnsEmpty() {
-		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class))).thenReturn(Mono.empty());
-
-		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
-				"default-client", Collections.emptyMap());
-
-		Instance instance = buildInstance("some-service");
-
-		StepVerifier.create(provider.getHeaders(instance))
-			.assertNext((headers) -> assertThat(headers.toSingleValueMap()).isEmpty())
-			.verifyComplete();
-
-		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
-		verify(this.authorizedClientManager).authorize(captor.capture());
-		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("default-client");
-	}
-
-	@Test
-	void serviceMapOverrideIsUsed_whenRegistered() {
-		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("specific-client", "specific-token");
-		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
-			.thenReturn(Mono.just(authorizedClient));
-
-		Map<String, String> serviceMap = Collections.singletonMap("target-service", "specific-client");
-		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
-				null, serviceMap);
-
-		Instance instance = buildInstance("target-service");
-
-		StepVerifier.create(provider.getHeaders(instance))
-			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
-				.isEqualTo("Bearer specific-token"))
-			.verifyComplete();
-
-		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
-		verify(this.authorizedClientManager).authorize(captor.capture());
-		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("specific-client");
-	}
-
-	@Test
-	void metadataRegistrationIdIgnored_whenAllowMetadataOverrideIsFalse() {
+	void defaultRegistrationIdIsUsed_whenNoServiceOverrideExists() {
 		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("default-client", "default-token");
 		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
 			.thenReturn(Mono.just(authorizedClient));
 
+		OAuth2RegistrationIdResolver resolver = chainResolver("default-client", Collections.emptyMap());
 		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
-				"default-client", Collections.emptyMap(), false);
+				resolver);
 
-		Instance instance = buildInstanceWithMetadata("some-service", "oauth2.registration-id", "metadata-client");
+		Instance instance = buildInstance("some-service");
 
 		StepVerifier.create(provider.getHeaders(instance))
 			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
@@ -201,8 +186,61 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 
 		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
 		verify(this.authorizedClientManager).authorize(captor.capture());
-		// metadata-client must NOT be used; default-client is used instead
 		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("default-client");
+	}
+
+	@Test
+	void emptyHeadersReturnedWhenNoRegistrationIdConfigured() {
+		OAuth2RegistrationIdResolver resolver = chainResolver(null, Collections.emptyMap());
+		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
+				resolver);
+
+		StepVerifier.create(provider.getHeaders(buildInstance("some-service")))
+			.assertNext((headers) -> assertThat(headers.toSingleValueMap()).isEmpty())
+			.verifyComplete();
+	}
+
+	@Test
+	void customResolverCanIgnoreMetadata() {
+		// A fixed resolver that never checks metadata — simulates an operator-controlled
+		// trust boundary (replaces the old allowMetadataOverride=false flag)
+		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("fixed-client", "fixed-token");
+		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
+			.thenReturn(Mono.just(authorizedClient));
+
+		OAuth2RegistrationIdResolver fixedResolver = (instance) -> "fixed-client";
+		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
+				fixedResolver);
+
+		// instance has metadata claiming a different registration ID
+		Instance instance = buildInstanceWithMetadata("svc", "oauth2.registration-id", "metadata-client");
+
+		StepVerifier.create(provider.getHeaders(instance))
+			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
+				.isEqualTo("Bearer fixed-token"))
+			.verifyComplete();
+
+		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
+		verify(this.authorizedClientManager).authorize(captor.capture());
+		// metadata-client must NOT have been used
+		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("fixed-client");
+	}
+
+	// ---------------------------------------------------------------------------
+	// Helpers
+	// ---------------------------------------------------------------------------
+
+	/**
+	 * Builds a resolver chain that mirrors the default auto-configuration: metadata →
+	 * serviceMap → defaultId.
+	 * @param defaultId the fallback registration ID (may be null)
+	 * @param serviceMap per-service registration ID overrides
+	 * @return a chained resolver
+	 */
+	private static OAuth2RegistrationIdResolver chainResolver(String defaultId, Map<String, String> serviceMap) {
+		return OAuth2ReactiveHttpHeadersProvider.metadataRegistrationIdResolver()
+			.andThen((instance) -> serviceMap.get(instance.getRegistration().getName()))
+			.andThen((instance) -> defaultId);
 	}
 
 	private static Instance buildInstance(String serviceName) {

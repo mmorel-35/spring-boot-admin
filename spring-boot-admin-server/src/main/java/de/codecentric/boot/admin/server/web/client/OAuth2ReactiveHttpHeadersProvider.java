@@ -16,7 +16,6 @@
 
 package de.codecentric.boot.admin.server.web.client;
 
-import java.util.Collections;
 import java.util.Map;
 
 import org.jspecify.annotations.Nullable;
@@ -39,28 +38,23 @@ import de.codecentric.boot.admin.server.web.client.reactive.ReactiveHttpHeadersP
  * {@link ReactiveOAuth2AuthorizedClientManager}.
  *
  * <p>
- * Resolution order for the registration ID:
- * <ol>
- * <li>Instance metadata key {@code "oauth2.registration-id"} (also accepted:
- * {@code "oauth2-registration-id"})</li>
- * <li>Per-service override via {@code serviceRegistrationMap} (keyed by
- * {@link de.codecentric.boot.admin.server.domain.values.Registration#getName()})</li>
- * <li>Default registration ID</li>
- * <li>No-op (returns empty headers) if none of the above is configured</li>
- * </ol>
+ * The registration ID is determined by the supplied {@link OAuth2RegistrationIdResolver}.
+ * The default resolver reads the ID from the instance metadata keys
+ * {@code "oauth2.registration-id"} / {@code "oauth2-registration-id"} (see
+ * {@link #metadataRegistrationIdResolver()}). More complex chains — falling back to a
+ * service-map or a global default — are composed using
+ * {@link OAuth2RegistrationIdResolver#andThen(OAuth2RegistrationIdResolver)}.
  *
  * <p>
- * <strong>Trust model:</strong> Instance metadata is supplied by the registering client
- * application. In a multi-tenant or untrusted-registration environment a malicious client
- * could set the {@code oauth2.registration-id} metadata key to any value, causing the
- * server to use a different OAuth2 client registration (and therefore different
- * credentials) when polling that instance. Only deploy this provider in environments
- * where you trust all registered clients, or ensure that metadata-supplied registration
- * IDs cannot be used to escalate privileges by constraining allowed registration IDs via
- * the server-side {@code serviceRegistrationMap} and {@code defaultRegistrationId}
- * configuration, and by avoiding reliance on the {@code oauth2.registration-id} metadata
- * key in untrusted environments. You can also disable metadata-based registration ID
- * resolution entirely by setting {@code allowMetadataOverride = false}.
+ * <strong>Trust model:</strong> When the default resolver chain includes metadata-based
+ * resolution, instance metadata is controlled by the registering client. In a
+ * multi-tenant or untrusted-registration environment a malicious client could set the
+ * {@code oauth2.registration-id} metadata key to any value, causing the server to use a
+ * different OAuth2 client registration when polling that instance. To prevent this,
+ * supply a custom {@link OAuth2RegistrationIdResolver} bean that does not inspect
+ * instance metadata. Auto-configuration exposes the default resolver as a
+ * {@code @ConditionalOnMissingBean} so that a replacement can be wired in without
+ * modifying any other component.
  */
 public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersProvider {
 
@@ -72,38 +66,43 @@ public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersPro
 
 	private final ReactiveOAuth2AuthorizedClientManager authorizedClientManager;
 
-	@Nullable private final String defaultRegistrationId;
+	private final OAuth2RegistrationIdResolver registrationIdResolver;
 
-	private final Map<String, String> serviceRegistrationMap;
-
-	private final boolean allowMetadataOverride;
-
+	/**
+	 * Creates a provider that resolves the registration ID from instance metadata only
+	 * (using {@link #metadataRegistrationIdResolver()}).
+	 * @param authorizedClientManager the manager used to obtain Bearer tokens
+	 */
 	public OAuth2ReactiveHttpHeadersProvider(ReactiveOAuth2AuthorizedClientManager authorizedClientManager) {
-		this(authorizedClientManager, null, Collections.emptyMap(), true);
+		this(authorizedClientManager, metadataRegistrationIdResolver());
 	}
 
+	/**
+	 * Creates a provider that uses the given {@link OAuth2RegistrationIdResolver} to
+	 * determine the registration ID per instance.
+	 * @param authorizedClientManager the manager used to obtain Bearer tokens
+	 * @param registrationIdResolver the resolver that maps an instance to a registration
+	 * ID
+	 */
 	public OAuth2ReactiveHttpHeadersProvider(ReactiveOAuth2AuthorizedClientManager authorizedClientManager,
-			boolean allowMetadataOverride) {
-		this(authorizedClientManager, null, Collections.emptyMap(), allowMetadataOverride);
-	}
-
-	public OAuth2ReactiveHttpHeadersProvider(ReactiveOAuth2AuthorizedClientManager authorizedClientManager,
-			@Nullable String defaultRegistrationId, Map<String, String> serviceRegistrationMap) {
-		this(authorizedClientManager, defaultRegistrationId, serviceRegistrationMap, true);
-	}
-
-	public OAuth2ReactiveHttpHeadersProvider(ReactiveOAuth2AuthorizedClientManager authorizedClientManager,
-			@Nullable String defaultRegistrationId, Map<String, String> serviceRegistrationMap,
-			boolean allowMetadataOverride) {
+			OAuth2RegistrationIdResolver registrationIdResolver) {
 		this.authorizedClientManager = authorizedClientManager;
-		this.defaultRegistrationId = defaultRegistrationId;
-		this.serviceRegistrationMap = serviceRegistrationMap;
-		this.allowMetadataOverride = allowMetadataOverride;
+		this.registrationIdResolver = registrationIdResolver;
+	}
+
+	/**
+	 * Returns an {@link OAuth2RegistrationIdResolver} that reads the registration ID from
+	 * the instance metadata keys {@code "oauth2.registration-id"} and
+	 * {@code "oauth2-registration-id"}.
+	 * @return a metadata-based resolver
+	 */
+	public static OAuth2RegistrationIdResolver metadataRegistrationIdResolver() {
+		return (instance) -> getMetadataValue(instance, REGISTRATION_ID_KEYS);
 	}
 
 	@Override
 	public Mono<HttpHeaders> getHeaders(Instance instance) {
-		String registrationId = resolveRegistrationId(instance);
+		String registrationId = this.registrationIdResolver.resolve(instance);
 		if (registrationId == null) {
 			return Mono.just(HttpHeaders.EMPTY);
 		}
@@ -119,21 +118,6 @@ public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersPro
 			headers.setBearerAuth(accessToken.getTokenValue());
 			return Mono.just(headers);
 		}).defaultIfEmpty(HttpHeaders.EMPTY);
-	}
-
-	@Nullable private String resolveRegistrationId(Instance instance) {
-		if (this.allowMetadataOverride) {
-			String fromMetadata = getMetadataValue(instance, REGISTRATION_ID_KEYS);
-			if (fromMetadata != null) {
-				return fromMetadata;
-			}
-		}
-		String serviceName = instance.getRegistration().getName();
-		String fromServiceMap = this.serviceRegistrationMap.get(serviceName);
-		if (StringUtils.hasText(fromServiceMap)) {
-			return fromServiceMap;
-		}
-		return StringUtils.hasText(this.defaultRegistrationId) ? this.defaultRegistrationId : null;
 	}
 
 	@Nullable private static String getMetadataValue(Instance instance, String[] keys) {

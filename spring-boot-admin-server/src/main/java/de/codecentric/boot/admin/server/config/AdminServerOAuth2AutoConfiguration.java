@@ -16,6 +16,8 @@
 
 package de.codecentric.boot.admin.server.config;
 
+import java.util.Map;
+
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -24,8 +26,10 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.client.ReactiveOAuth2AuthorizedClientManager;
+import org.springframework.util.StringUtils;
 
 import de.codecentric.boot.admin.server.web.client.OAuth2ReactiveHttpHeadersProvider;
+import de.codecentric.boot.admin.server.web.client.OAuth2RegistrationIdResolver;
 
 /**
  * Auto-configuration for server-side OAuth2 Client Credentials support. Registers an
@@ -46,6 +50,15 @@ import de.codecentric.boot.admin.server.web.client.OAuth2ReactiveHttpHeadersProv
  * {@link AdminServerInstanceWebClientConfiguration} evaluates the
  * {@code @ConditionalOnBean(ReactiveHttpHeadersProvider.class)} condition on the reactive
  * headers exchange filter bean.
+ *
+ * <p>
+ * Both the {@link OAuth2RegistrationIdResolver} and the
+ * {@link OAuth2ReactiveHttpHeadersProvider} are exposed as
+ * {@code @ConditionalOnMissingBean} beans, allowing applications to replace either
+ * component individually via a custom {@code @Bean} definition. To suppress
+ * metadata-based registration ID resolution, for example in multi-tenant environments,
+ * provide a custom {@link OAuth2RegistrationIdResolver} that does not inspect instance
+ * metadata.
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnClass(ReactiveOAuth2AuthorizedClientManager.class)
@@ -55,16 +68,25 @@ import de.codecentric.boot.admin.server.web.client.OAuth2ReactiveHttpHeadersProv
 public class AdminServerOAuth2AutoConfiguration {
 
 	@Bean
+	@ConditionalOnMissingBean(OAuth2RegistrationIdResolver.class)
+	public OAuth2RegistrationIdResolver oauth2RegistrationIdResolver(AdminServerProperties properties) {
+		AdminServerProperties.InstanceAuthProperties instanceAuth = properties.getInstanceAuth();
+		OAuth2RegistrationIdResolver resolver = OAuth2ReactiveHttpHeadersProvider.metadataRegistrationIdResolver();
+		if (instanceAuth.isEnabled()) {
+			AdminServerProperties.InstanceOAuth2Properties oauth2 = instanceAuth.getOauth2();
+			Map<String, String> serviceMap = oauth2.getServiceMap();
+			String defaultId = oauth2.getDefaultRegistrationId();
+			resolver = resolver.andThen((instance) -> serviceMap.get(instance.getRegistration().getName()))
+				.andThen((instance) -> StringUtils.hasText(defaultId) ? defaultId : null);
+		}
+		return resolver;
+	}
+
+	@Bean
 	@ConditionalOnMissingBean(OAuth2ReactiveHttpHeadersProvider.class)
 	public OAuth2ReactiveHttpHeadersProvider oauth2ReactiveHttpHeadersProvider(
-			ReactiveOAuth2AuthorizedClientManager manager, AdminServerProperties properties) {
-		AdminServerProperties.InstanceAuthProperties instanceAuth = properties.getInstanceAuth();
-		AdminServerProperties.InstanceOAuth2Properties oauth2 = instanceAuth.getOauth2();
-		if (instanceAuth.isEnabled()) {
-			return new OAuth2ReactiveHttpHeadersProvider(manager, oauth2.getDefaultRegistrationId(),
-					oauth2.getServiceMap(), oauth2.isAllowMetadataOverride());
-		}
-		return new OAuth2ReactiveHttpHeadersProvider(manager, oauth2.isAllowMetadataOverride());
+			ReactiveOAuth2AuthorizedClientManager manager, OAuth2RegistrationIdResolver registrationIdResolver) {
+		return new OAuth2ReactiveHttpHeadersProvider(manager, registrationIdResolver);
 	}
 
 }
