@@ -16,10 +16,11 @@
 
 package de.codecentric.boot.admin.server.config;
 
-import org.springframework.boot.autoconfigure.AutoConfigureAfter;
+import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.client.ReactiveOAuth2AuthorizedClientManager;
@@ -40,13 +41,17 @@ import de.codecentric.boot.admin.server.web.client.OAuth2ReactiveHttpHeadersProv
  * without risking a {@link NoClassDefFoundError}.
  *
  * <p>
- * Configured after {@link AdminServerAutoConfiguration} to ensure that
- * {@link AdminServerProperties} is available.
+ * Configured <em>before</em> {@link AdminServerAutoConfiguration} so that the
+ * {@link OAuth2ReactiveHttpHeadersProvider} bean is already registered when
+ * {@link AdminServerInstanceWebClientConfiguration} evaluates the
+ * {@code @ConditionalOnBean(ReactiveHttpHeadersProvider.class)} condition on the reactive
+ * headers exchange filter bean.
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnClass(ReactiveOAuth2AuthorizedClientManager.class)
 @ConditionalOnBean(ReactiveOAuth2AuthorizedClientManager.class)
-@AutoConfigureAfter(AdminServerAutoConfiguration.class)
+@AutoConfigureBefore(AdminServerAutoConfiguration.class)
+@EnableConfigurationProperties(AdminServerProperties.class)
 public class AdminServerOAuth2AutoConfiguration {
 
 	@Bean

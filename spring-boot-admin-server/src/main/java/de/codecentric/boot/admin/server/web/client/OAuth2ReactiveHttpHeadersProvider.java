@@ -55,10 +55,11 @@ import de.codecentric.boot.admin.server.web.client.reactive.ReactiveHttpHeadersP
  * could set the {@code oauth2.registration-id} metadata key to any value, causing the
  * server to use a different OAuth2 client registration (and therefore different
  * credentials) when polling that instance. Only deploy this provider in environments
- * where you trust all registered clients, or restrict metadata-supplied registration IDs
- * to known values via the {@code service-map} and {@code default-registration-id}
- * properties (which are under server-side control) by disabling the metadata-key
- * override.
+ * where you trust all registered clients, or ensure that metadata-supplied registration
+ * IDs cannot be used to escalate privileges by constraining allowed registration IDs via
+ * the server-side {@code serviceRegistrationMap} and {@code defaultRegistrationId}
+ * configuration, and by avoiding reliance on the {@code oauth2.registration-id} metadata
+ * key in untrusted environments.
  */
 public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersProvider {
 
