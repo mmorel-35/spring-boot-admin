@@ -90,6 +90,22 @@ class AdminServerOAuth2AutoConfigurationTest {
 				assertThat(provider).extracting("defaultRegistrationId").isEqualTo("my-client");
 				assertThat(provider).extracting("serviceRegistrationMap")
 					.isEqualTo(Map.of("payment-service", "payment-client"));
+				assertThat(provider).extracting("allowMetadataOverride").isEqualTo(true);
+			});
+	}
+
+	@Test
+	void withAllowMetadataOverrideDisabled_createsProviderWithMetadataOverrideDisabled() {
+		this.contextRunner
+			.withBean(ReactiveOAuth2AuthorizedClientManager.class,
+					() -> mock(ReactiveOAuth2AuthorizedClientManager.class))
+			.withPropertyValues("spring.boot.admin.instance-auth.enabled=true",
+					"spring.boot.admin.instance-auth.oauth2.default-registration-id=my-client",
+					"spring.boot.admin.instance-auth.oauth2.allow-metadata-override=false")
+			.run((context) -> {
+				assertThat(context).hasSingleBean(OAuth2ReactiveHttpHeadersProvider.class);
+				OAuth2ReactiveHttpHeadersProvider provider = context.getBean(OAuth2ReactiveHttpHeadersProvider.class);
+				assertThat(provider).extracting("allowMetadataOverride").isEqualTo(false);
 			});
 	}
 

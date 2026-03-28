@@ -214,6 +214,17 @@ public class AdminServerProperties {
 		 */
 		private Map<String, String> serviceMap = new HashMap<>();
 
+		/**
+		 * Whether to allow a registering instance to override the OAuth2 registration ID
+		 * via its instance metadata ({@code oauth2.registration-id} /
+		 * {@code oauth2-registration-id} keys). When set to {@code false} the server-side
+		 * {@link #serviceMap} / {@link #defaultRegistrationId} are the sole source of
+		 * registration IDs, which is the recommended setting in multi-tenant or
+		 * untrusted-registration environments. Defaults to {@code true} for backwards
+		 * compatibility.
+		 */
+		private boolean allowMetadataOverride = true;
+
 	}
 
 	@lombok.Data

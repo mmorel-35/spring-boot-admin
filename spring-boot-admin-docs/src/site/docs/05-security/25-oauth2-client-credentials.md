@@ -201,6 +201,27 @@ The registration ID is resolved in the following priority order (highest first):
 
 If none of the above yields a registration ID for an instance, no OAuth2 header is added for that instance.
 
+:::warning
+Instance metadata is controlled by the registering client application. In multi-tenant or
+untrusted-registration environments, a malicious client could set `oauth2.registration-id` to any value
+and cause the server to send an OAuth2 token obtained with different credentials to that instance.
+
+To prevent this, set `allow-metadata-override: false` — the server will then ignore the metadata key
+entirely and use only `service-map` / `default-registration-id`:
+
+```yaml title="server application.yml"
+spring:
+  boot:
+    admin:
+      instance-auth:
+        oauth2:
+          allow-metadata-override: false   # secure-by-default in untrusted environments
+          default-registration-id: instances-client
+          service-map:
+            payment-service: payment-service-client
+```
+:::
+
 ---
 
 ## Combined Example

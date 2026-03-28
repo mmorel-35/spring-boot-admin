@@ -59,7 +59,8 @@ import de.codecentric.boot.admin.server.web.client.reactive.ReactiveHttpHeadersP
  * IDs cannot be used to escalate privileges by constraining allowed registration IDs via
  * the server-side {@code serviceRegistrationMap} and {@code defaultRegistrationId}
  * configuration, and by avoiding reliance on the {@code oauth2.registration-id} metadata
- * key in untrusted environments.
+ * key in untrusted environments. You can also disable metadata-based registration ID
+ * resolution entirely by setting {@code allowMetadataOverride = false}.
  */
 public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersProvider {
 
@@ -75,15 +76,29 @@ public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersPro
 
 	private final Map<String, String> serviceRegistrationMap;
 
+	private final boolean allowMetadataOverride;
+
 	public OAuth2ReactiveHttpHeadersProvider(ReactiveOAuth2AuthorizedClientManager authorizedClientManager) {
-		this(authorizedClientManager, null, Collections.emptyMap());
+		this(authorizedClientManager, null, Collections.emptyMap(), true);
+	}
+
+	public OAuth2ReactiveHttpHeadersProvider(ReactiveOAuth2AuthorizedClientManager authorizedClientManager,
+			boolean allowMetadataOverride) {
+		this(authorizedClientManager, null, Collections.emptyMap(), allowMetadataOverride);
 	}
 
 	public OAuth2ReactiveHttpHeadersProvider(ReactiveOAuth2AuthorizedClientManager authorizedClientManager,
 			@Nullable String defaultRegistrationId, Map<String, String> serviceRegistrationMap) {
+		this(authorizedClientManager, defaultRegistrationId, serviceRegistrationMap, true);
+	}
+
+	public OAuth2ReactiveHttpHeadersProvider(ReactiveOAuth2AuthorizedClientManager authorizedClientManager,
+			@Nullable String defaultRegistrationId, Map<String, String> serviceRegistrationMap,
+			boolean allowMetadataOverride) {
 		this.authorizedClientManager = authorizedClientManager;
 		this.defaultRegistrationId = defaultRegistrationId;
 		this.serviceRegistrationMap = serviceRegistrationMap;
+		this.allowMetadataOverride = allowMetadataOverride;
 	}
 
 	@Override
@@ -107,9 +122,11 @@ public class OAuth2ReactiveHttpHeadersProvider implements ReactiveHttpHeadersPro
 	}
 
 	@Nullable private String resolveRegistrationId(Instance instance) {
-		String fromMetadata = getMetadataValue(instance, REGISTRATION_ID_KEYS);
-		if (fromMetadata != null) {
-			return fromMetadata;
+		if (this.allowMetadataOverride) {
+			String fromMetadata = getMetadataValue(instance, REGISTRATION_ID_KEYS);
+			if (fromMetadata != null) {
+				return fromMetadata;
+			}
 		}
 		String serviceName = instance.getRegistration().getName();
 		String fromServiceMap = this.serviceRegistrationMap.get(serviceName);

@@ -62,9 +62,9 @@ public class AdminServerOAuth2AutoConfiguration {
 		AdminServerProperties.InstanceOAuth2Properties oauth2 = instanceAuth.getOauth2();
 		if (instanceAuth.isEnabled()) {
 			return new OAuth2ReactiveHttpHeadersProvider(manager, oauth2.getDefaultRegistrationId(),
-					oauth2.getServiceMap());
+					oauth2.getServiceMap(), oauth2.isAllowMetadataOverride());
 		}
-		return new OAuth2ReactiveHttpHeadersProvider(manager);
+		return new OAuth2ReactiveHttpHeadersProvider(manager, oauth2.isAllowMetadataOverride());
 	}
 
 }

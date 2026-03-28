@@ -183,6 +183,28 @@ class OAuth2ReactiveHttpHeadersProviderTest {
 		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("specific-client");
 	}
 
+	@Test
+	void metadataRegistrationIdIgnored_whenAllowMetadataOverrideIsFalse() {
+		OAuth2AuthorizedClient authorizedClient = buildAuthorizedClient("default-client", "default-token");
+		when(this.authorizedClientManager.authorize(any(OAuth2AuthorizeRequest.class)))
+			.thenReturn(Mono.just(authorizedClient));
+
+		OAuth2ReactiveHttpHeadersProvider provider = new OAuth2ReactiveHttpHeadersProvider(this.authorizedClientManager,
+				"default-client", Collections.emptyMap(), false);
+
+		Instance instance = buildInstanceWithMetadata("some-service", "oauth2.registration-id", "metadata-client");
+
+		StepVerifier.create(provider.getHeaders(instance))
+			.assertNext((headers) -> assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION))
+				.isEqualTo("Bearer default-token"))
+			.verifyComplete();
+
+		ArgumentCaptor<OAuth2AuthorizeRequest> captor = ArgumentCaptor.forClass(OAuth2AuthorizeRequest.class);
+		verify(this.authorizedClientManager).authorize(captor.capture());
+		// metadata-client must NOT be used; default-client is used instead
+		assertThat(captor.getValue().getClientRegistrationId()).isEqualTo("default-client");
+	}
+
 	private static Instance buildInstance(String serviceName) {
 		Registration registration = Registration.create(serviceName, "https://health").name(serviceName).build();
 		return Instance.create(InstanceId.of("id")).register(registration);
