@@ -158,7 +158,7 @@ spring:
         oauth2:
           # Default registration ID for all instances
           default-registration-id: instances-client
-          # Per-service override (key = spring.application.name of the registered service)
+          # Per-service override (key = registered service name, defaults to spring.application.name)
           service-map:
             payment-service: payment-service-client
             inventory-service: inventory-service-client
@@ -196,7 +196,7 @@ The registration ID is resolved in the following priority order (highest first):
                oauth2.registration-id: my-instance-client
    ```
 
-2. **`service-map`** — server-side per-service override keyed by `spring.application.name`
+2. **`service-map`** — server-side per-service override keyed by the registered service name (defaults to `spring.application.name`, overridable via `spring.boot.admin.client.instance.name`)
 3. **`default-registration-id`** — server-side fallback for all instances
 
 If none of the above yields a registration ID for an instance, no OAuth2 header is added for that instance.
