@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2023 the original author or authors.
+ * Copyright 2014-2026 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,15 +19,21 @@ package de.codecentric.boot.admin.server.web.servlet;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
+import java.util.Optional;
 import java.util.Set;
 
 import jakarta.servlet.AsyncContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.http.server.ServletServerHttpResponse;
@@ -49,6 +55,8 @@ import de.codecentric.boot.admin.server.services.InstanceRegistry;
 import de.codecentric.boot.admin.server.web.AdminController;
 import de.codecentric.boot.admin.server.web.HttpHeaderFilter;
 import de.codecentric.boot.admin.server.web.InstanceWebProxy;
+import de.codecentric.boot.admin.server.web.cache.ActuatorResponseCache;
+import de.codecentric.boot.admin.server.web.cache.CacheEntry;
 import de.codecentric.boot.admin.server.web.client.InstanceWebClient;
 
 /**
@@ -56,6 +64,8 @@ import de.codecentric.boot.admin.server.web.client.InstanceWebClient;
  */
 @AdminController
 public class InstancesProxyController {
+
+	private static final Logger log = LoggerFactory.getLogger(InstancesProxyController.class);
 
 	private static final String INSTANCE_MAPPED_PATH = "/instances/{instanceId}/actuator/**";
 
@@ -73,12 +83,20 @@ public class InstancesProxyController {
 
 	private final String adminContextPath;
 
+	@Nullable private final ActuatorResponseCache responseCache;
+
 	public InstancesProxyController(String adminContextPath, Set<String> ignoredHeaders, InstanceRegistry registry,
 			InstanceWebClient instanceWebClient) {
+		this(adminContextPath, ignoredHeaders, registry, instanceWebClient, null);
+	}
+
+	public InstancesProxyController(String adminContextPath, Set<String> ignoredHeaders, InstanceRegistry registry,
+			InstanceWebClient instanceWebClient, @Nullable ActuatorResponseCache responseCache) {
 		this.adminContextPath = adminContextPath;
 		this.registry = registry;
 		this.httpHeadersFilter = new HttpHeaderFilter(ignoredHeaders);
 		this.instanceWebProxy = new InstanceWebProxy(instanceWebClient);
+		this.responseCache = responseCache;
 	}
 
 	@ResponseBody
@@ -96,20 +114,71 @@ public class InstancesProxyController {
 		try {
 			ServletServerHttpRequest request = new ServletServerHttpRequest(
 					(HttpServletRequest) asyncContext.getRequest());
-			Flux<DataBuffer> requestBody = DataBufferUtils.readInputStream(request::getBody, this.bufferFactory, 4096);
-			InstanceWebProxy.ForwardRequest fwdRequest = createForwardRequest(request, requestBody,
-					this.adminContextPath + INSTANCE_MAPPED_PATH);
+			String localPath = getLocalPath(this.adminContextPath + INSTANCE_MAPPED_PATH, request);
+			String rawQuery = request.getURI().getRawQuery();
+			String endpointId = extractEndpointId(localPath);
 
-			this.instanceWebProxy
-				.forward(this.registry.getInstance(InstanceId.of(instanceId)), fwdRequest, (clientResponse) -> {
+			// Serve from cache when possible (GET only, configured endpoints, cache hit)
+			if (this.responseCache != null && this.responseCache.shouldCache(request.getMethod(), endpointId)) {
+				InstanceId id = InstanceId.of(instanceId);
+				Optional<CacheEntry> cached = this.responseCache.get(id, localPath, rawQuery);
+				if (cached.isPresent()) {
+					log.trace("Cache hit for instance {} endpoint '{}'", instanceId, endpointId);
+					CacheEntry entry = cached.get();
 					ServerHttpResponse response = new ServletServerHttpResponse(
 							(HttpServletResponse) asyncContext.getResponse());
-					response.setStatusCode(clientResponse.statusCode());
-					response.getHeaders()
-						.addAll(this.httpHeadersFilter.filterHeaders(clientResponse.headers().asHttpHeaders()));
+					response.setStatusCode(HttpStatusCode.valueOf(entry.getStatusCode()));
+					response.getHeaders().addAll(entry.getHttpHeaders());
 					try {
 						OutputStream responseBody = response.getBody();
 						response.flush();
+						responseBody.write(entry.getBody());
+						responseBody.flush();
+					}
+					catch (IOException ex) {
+						throw new RuntimeException(ex);
+					}
+					return;
+				}
+				log.trace("Cache miss for instance {} endpoint '{}'", instanceId, endpointId);
+			}
+
+			Flux<DataBuffer> requestBody = DataBufferUtils.readInputStream(request::getBody, this.bufferFactory, 4096);
+			InstanceWebProxy.ForwardRequest fwdRequest = createForwardRequest(request, requestBody, localPath,
+					rawQuery);
+
+			boolean fillCache = this.responseCache != null
+					&& this.responseCache.shouldCache(request.getMethod(), endpointId);
+
+			this.instanceWebProxy
+				.forward(this.registry.getInstance(InstanceId.of(instanceId)), fwdRequest, (clientResponse) -> {
+					HttpStatusCode statusCode = clientResponse.statusCode();
+					HttpHeaders filteredHeaders = this.httpHeadersFilter
+						.filterHeaders(clientResponse.headers().asHttpHeaders());
+					ServerHttpResponse response = new ServletServerHttpResponse(
+							(HttpServletResponse) asyncContext.getResponse());
+					response.setStatusCode(statusCode);
+					response.getHeaders().addAll(filteredHeaders);
+					try {
+						OutputStream responseBody = response.getBody();
+						response.flush();
+						if (fillCache && statusCode.is2xxSuccessful()) {
+							InstanceId id = InstanceId.of(instanceId);
+							return DataBufferUtils.join(clientResponse.body(BodyExtractors.toDataBuffers()))
+								.switchIfEmpty(Mono.fromSupplier(() -> this.bufferFactory.allocateBuffer(0)))
+								.flatMap((joined) -> {
+									byte[] bytes = new byte[joined.readableByteCount()];
+									joined.read(bytes);
+									DataBufferUtils.release(joined);
+									if (bytes.length <= this.responseCache.getMaxPayloadSize()) {
+										this.responseCache.put(id, localPath, rawQuery,
+												new CacheEntry(statusCode.value(), filteredHeaders, bytes));
+										log.trace("Cached response for instance {} endpoint '{}' ({} bytes)",
+												instanceId, endpointId, bytes.length);
+									}
+									return writeAndFlush(Flux.just(this.bufferFactory.wrap(bytes)), responseBody);
+								});
+						}
 						return clientResponse.body(BodyExtractors.toDataBuffers())
 							.window(1)
 							.concatMap((body) -> writeAndFlush(body, responseBody))
@@ -147,12 +216,12 @@ public class InstancesProxyController {
 
 	private InstanceWebProxy.ForwardRequest createForwardRequest(ServletServerHttpRequest request,
 			Flux<DataBuffer> body, String pathPattern) {
-		String endpointLocalPath = this.getLocalPath(pathPattern, request);
-		URI uri = UriComponentsBuilder.fromPath(endpointLocalPath)
-			.query(request.getURI().getRawQuery())
-			.build(true)
-			.toUri();
+		return createForwardRequest(request, body, getLocalPath(pathPattern, request), request.getURI().getRawQuery());
+	}
 
+	private InstanceWebProxy.ForwardRequest createForwardRequest(ServletServerHttpRequest request,
+			Flux<DataBuffer> body, String localPath, @Nullable String rawQuery) {
+		URI uri = UriComponentsBuilder.fromPath(localPath).query(rawQuery).build(true).toUri();
 		return InstanceWebProxy.ForwardRequest.builder()
 			.uri(uri)
 			.method(request.getMethod())
@@ -178,6 +247,11 @@ public class InstancesProxyController {
 				sink.error(ex);
 			}
 		}));
+	}
+
+	private static String extractEndpointId(String localPath) {
+		int slash = localPath.indexOf('/');
+		return (slash > 0) ? localPath.substring(0, slash) : localPath;
 	}
 
 }

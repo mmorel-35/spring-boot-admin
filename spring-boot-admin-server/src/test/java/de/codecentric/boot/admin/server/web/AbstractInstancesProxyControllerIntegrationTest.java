@@ -44,6 +44,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.delete;
 import static com.github.tomakehurst.wiremock.client.WireMock.deleteRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.exactly;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.ok;
@@ -249,6 +250,49 @@ public abstract class AbstractInstancesProxyControllerIntegrationTest {
 		this.wireMock.verify(deleteRequestedFor(urlEqualTo("/instance2/delete")));
 	}
 
+	@Test
+	public void should_serve_second_request_from_cache() {
+		// mappings is in the default cached-endpoints set
+		this.client.get()
+			.uri("/instances/{instanceId}/actuator/mappings", this.instanceId)
+			.exchange()
+			.expectStatus()
+			.isOk()
+			.expectBody(String.class)
+			.isEqualTo("{ \"contexts\": {} }");
+
+		// Second request must be served from cache
+		this.client.get()
+			.uri("/instances/{instanceId}/actuator/mappings", this.instanceId)
+			.exchange()
+			.expectStatus()
+			.isOk()
+			.expectBody(String.class)
+			.isEqualTo("{ \"contexts\": {} }");
+
+		// Upstream should only have been called once
+		this.wireMock.verify(exactly(1), getRequestedFor(urlEqualTo("/instance1/mappings")));
+	}
+
+	@Test
+	public void should_not_cache_non_configured_endpoint() {
+		// 'test' is NOT in the default cached-endpoints set
+		this.client.get()
+			.uri("/instances/{instanceId}/actuator/test", this.instanceId)
+			.exchange()
+			.expectStatus()
+			.isOk();
+
+		this.client.get()
+			.uri("/instances/{instanceId}/actuator/test", this.instanceId)
+			.exchange()
+			.expectStatus()
+			.isOk();
+
+		// Upstream must have been called both times
+		this.wireMock.verify(exactly(2), getRequestedFor(urlEqualTo("/instance1/test")));
+	}
+
 	private void stubForInstance(String managementPath) {
 		String managementUrl = this.wireMock.url(managementPath);
 
@@ -256,6 +300,7 @@ public abstract class AbstractInstancesProxyControllerIntegrationTest {
 		String actuatorIndex = "{ \"_links\": { " +
 			"\"env\": { \"href\": \"" + managementUrl + "/env\", \"templated\": false }," +
 			"\"test\": { \"href\": \"" + managementUrl + "/test\", \"templated\": false }," +
+			"\"mappings\": { \"href\": \"" + managementUrl + "/mappings\", \"templated\": false }," +
 			"\"post\": { \"href\": \"" + managementUrl + "/post\", \"templated\": false }," +
 			"\"delete\": { \"href\": \"" + managementUrl + "/delete\", \"templated\": false }," +
 			"\"invalid\": { \"href\": \"" + managementUrl + "/invalid\", \"templated\": false }," +
@@ -275,6 +320,8 @@ public abstract class AbstractInstancesProxyControllerIntegrationTest {
 		this.wireMock.stubFor(get(urlEqualTo(managementPath + "/timeout")).willReturn(ok().withFixedDelay(10000)));
 		this.wireMock.stubFor(get(urlEqualTo(managementPath + "/test"))
 			.willReturn(ok("{ \"foo\" : \"bar\" }").withHeader(CONTENT_TYPE, ACTUATOR_CONTENT_TYPE)));
+		this.wireMock.stubFor(get(urlEqualTo(managementPath + "/mappings"))
+			.willReturn(ok("{ \"contexts\": {} }").withHeader(CONTENT_TYPE, ACTUATOR_CONTENT_TYPE)));
 		this.wireMock.stubFor(get(urlEqualTo(managementPath + "/test/has%20spaces"))
 			.willReturn(ok("{ \"foo\" : \"bar-with-spaces\" }").withHeader(CONTENT_TYPE, ACTUATOR_CONTENT_TYPE)));
 		this.wireMock.stubFor(post(urlEqualTo(managementPath + "/post")).willReturn(ok()));
