@@ -34,6 +34,7 @@ import de.codecentric.boot.admin.server.domain.values.InstanceId;
 import de.codecentric.boot.admin.server.domain.values.Registration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 class CacheInvalidationTriggerTest {
 
@@ -48,55 +49,57 @@ class CacheInvalidationTriggerTest {
 		EndpointCacheProperties props = new EndpointCacheProperties();
 		props.setDefaultTtl(Duration.ofMinutes(5));
 		this.cache = new InMemoryActuatorResponseCache(props);
-		this.eventSink = Sinks.many().multicast().directBestEffort();
+		this.eventSink = Sinks.many().multicast().onBackpressureBuffer();
 		this.trigger = new CacheInvalidationTrigger(this.eventSink.asFlux(), this.cache);
 		this.trigger.start();
 	}
 
 	@Test
-	void should_invalidate_on_deregistration() throws InterruptedException {
+	void should_invalidate_on_deregistration() {
 		InstanceId id = InstanceId.of("id1");
 		this.cache.put(id, "mappings", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
 		this.eventSink.tryEmitNext(new InstanceDeregisteredEvent(id, 1L));
-		Thread.sleep(100);
 
-		assertThat(this.cache.get(id, "mappings", null)).isEmpty();
+		await().atMost(Duration.ofMillis(500))
+			.untilAsserted(() -> assertThat(this.cache.get(id, "mappings", null)).isEmpty());
 	}
 
 	@Test
-	void should_invalidate_on_registration_update() throws InterruptedException {
+	void should_invalidate_on_registration_update() {
 		InstanceId id = InstanceId.of("id2");
 		Registration reg = Registration.create("app", "http://localhost/mgmt").build();
 		this.cache.put(id, "beans", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
 		this.eventSink.tryEmitNext(new InstanceRegistrationUpdatedEvent(id, 1L, reg));
-		Thread.sleep(100);
 
-		assertThat(this.cache.get(id, "beans", null)).isEmpty();
+		await().atMost(Duration.ofMillis(500))
+			.untilAsserted(() -> assertThat(this.cache.get(id, "beans", null)).isEmpty());
 	}
 
 	@Test
-	void should_invalidate_on_endpoints_detected() throws InterruptedException {
+	void should_invalidate_on_endpoints_detected() {
 		InstanceId id = InstanceId.of("id3");
 		this.cache.put(id, "configprops", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
 		this.eventSink.tryEmitNext(new InstanceEndpointsDetectedEvent(id, 1L, Endpoints.empty()));
-		Thread.sleep(100);
 
-		assertThat(this.cache.get(id, "configprops", null)).isEmpty();
+		await().atMost(Duration.ofMillis(500))
+			.untilAsserted(() -> assertThat(this.cache.get(id, "configprops", null)).isEmpty());
 	}
 
 	@Test
-	void should_not_invalidate_on_registered_event() throws InterruptedException {
+	void should_not_invalidate_on_registered_event() {
 		InstanceId id = InstanceId.of("id4");
 		Registration reg = Registration.create("app", "http://localhost/mgmt").build();
 		this.cache.put(id, "mappings", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
 		this.eventSink.tryEmitNext(new InstanceRegisteredEvent(id, 1L, reg));
-		Thread.sleep(100);
 
-		assertThat(this.cache.get(id, "mappings", null)).isPresent();
+		// Wait briefly then assert cache entry is still present
+		await().during(Duration.ofMillis(200))
+			.atMost(Duration.ofMillis(500))
+			.untilAsserted(() -> assertThat(this.cache.get(id, "mappings", null)).isPresent());
 	}
 
 }
