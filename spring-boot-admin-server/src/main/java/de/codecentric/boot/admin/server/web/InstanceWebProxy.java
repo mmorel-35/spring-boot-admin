@@ -100,6 +100,9 @@ public class InstanceWebProxy {
 
 	public InstanceWebProxy(InstanceWebClient instanceWebClient, @Nullable ActuatorResponseCache cache,
 			@Nullable HttpHeaderFilter headerFilter) {
+		if (cache != null && headerFilter == null) {
+			throw new IllegalArgumentException("headerFilter must be provided when cache is configured");
+		}
 		this.instanceWebClient = instanceWebClient;
 		this.cache = cache;
 		this.headerFilter = headerFilter;
@@ -187,6 +190,12 @@ public class InstanceWebProxy {
 			@Nullable String rawQuery, String endpointId, HttpStatusCode statusCode,
 			Function<ClientResponse, Mono<V>> responseHandler) {
 		HttpHeaders originalHeaders = clientResponse.headers().asHttpHeaders();
+		long contentLength = originalHeaders.getContentLength();
+		if (contentLength > this.cache.getMaxPayloadSize()) {
+			log.trace("Skipping cache for endpoint '{}': Content-Length {} exceeds limit {}", endpointId, contentLength,
+					this.cache.getMaxPayloadSize());
+			return responseHandler.apply(clientResponse);
+		}
 		return DataBufferUtils.join(clientResponse.body(BodyExtractors.toDataBuffers()))
 			.switchIfEmpty(Mono.fromSupplier(() -> this.bufferFactory.allocateBuffer(0)))
 			.flatMap((joined) -> {

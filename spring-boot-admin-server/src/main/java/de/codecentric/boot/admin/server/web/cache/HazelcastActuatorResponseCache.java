@@ -17,11 +17,11 @@
 package de.codecentric.boot.admin.server.web.cache;
 
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import com.hazelcast.map.IMap;
+import com.hazelcast.query.Predicate;
+import com.hazelcast.query.Predicates;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,30 +76,18 @@ public class HazelcastActuatorResponseCache implements ActuatorResponseCache {
 	@Override
 	public void invalidateAllForInstance(InstanceId instanceId) {
 		String prefix = instanceId.getValue() + ":";
-		Set<String> keysToRemove = this.map.keySet()
-			.stream()
-			.filter((k) -> k.startsWith(prefix))
-			.collect(Collectors.toSet());
-		keysToRemove.forEach(this.map::delete);
-		if (!keysToRemove.isEmpty()) {
-			log.debug("Invalidated {} Hazelcast cache entries for instance {}", keysToRemove.size(), instanceId);
-		}
+		Predicate<String, CacheEntry> predicate = Predicates.sql("__key LIKE '" + prefix + "%'");
+		this.map.removeAll(predicate);
+		log.debug("Invalidated Hazelcast cache entries for instance {}", instanceId);
 	}
 
 	@Override
 	public void invalidateEndpointForInstance(InstanceId instanceId, String endpointId) {
 		String baseKey = instanceId.getValue() + ":" + endpointId;
-		String baseKeyWithSlash = baseKey + "/";
-		String baseKeyWithQuery = baseKey + "?";
-		Set<String> keysToRemove = this.map.keySet()
-			.stream()
-			.filter((k) -> k.equals(baseKey) || k.startsWith(baseKeyWithSlash) || k.startsWith(baseKeyWithQuery))
-			.collect(Collectors.toSet());
-		keysToRemove.forEach(this.map::delete);
-		if (!keysToRemove.isEmpty()) {
-			log.debug("Invalidated {} Hazelcast cache entries for instance {} endpoint '{}'", keysToRemove.size(),
-					instanceId, endpointId);
-		}
+		Predicate<String, CacheEntry> predicate = Predicates.or(Predicates.equal("__key", baseKey),
+				Predicates.sql("__key LIKE '" + baseKey + "/%'"), Predicates.sql("__key LIKE '" + baseKey + "?%'"));
+		this.map.removeAll(predicate);
+		log.debug("Invalidated Hazelcast cache entries for instance {} endpoint '{}'", instanceId, endpointId);
 	}
 
 	@Override

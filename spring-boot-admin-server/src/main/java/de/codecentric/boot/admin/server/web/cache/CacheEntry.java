@@ -41,7 +41,7 @@ public final class CacheEntry implements Serializable {
 
 	/**
 	 * Response headers stored as a plain, serializable map. Security-sensitive headers
-	 * are stripped before the entry is created (see the proxy controllers).
+	 * are stripped before the entry is created (see {@code InstanceWebProxy}).
 	 */
 	private final Map<String, List<String>> headers;
 
@@ -72,7 +72,7 @@ public final class CacheEntry implements Serializable {
 	 */
 	public HttpHeaders getHttpHeaders() {
 		HttpHeaders httpHeaders = new HttpHeaders();
-		this.headers.forEach(httpHeaders::put);
+		this.headers.forEach((name, values) -> httpHeaders.put(name, new ArrayList<>(values)));
 		return httpHeaders;
 	}
 

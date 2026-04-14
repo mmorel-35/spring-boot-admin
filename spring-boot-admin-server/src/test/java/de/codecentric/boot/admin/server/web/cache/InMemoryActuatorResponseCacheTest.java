@@ -19,6 +19,7 @@ package de.codecentric.boot.admin.server.web.cache;
 import java.time.Duration;
 import java.util.Optional;
 
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -87,29 +88,29 @@ class InMemoryActuatorResponseCacheTest {
 	}
 
 	@Test
-	void should_evict_expired_entries_on_read() throws InterruptedException {
+	void should_evict_expired_entries_on_read() {
 		this.props.setDefaultTtl(Duration.ofMillis(50));
 		InstanceId id = InstanceId.of("id1");
 		this.cache.put(id, "mappings", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
 		assertThat(this.cache.get(id, "mappings", null)).isPresent();
 
-		Thread.sleep(100);
-
-		assertThat(this.cache.get(id, "mappings", null)).isEmpty();
+		Awaitility.await()
+			.atMost(Duration.ofSeconds(5))
+			.untilAsserted(() -> assertThat(this.cache.get(id, "mappings", null)).isEmpty());
 	}
 
 	@Test
-	void should_respect_per_endpoint_ttl() throws InterruptedException {
+	void should_respect_per_endpoint_ttl() {
 		this.props.setDefaultTtl(Duration.ofSeconds(60));
 		this.props.getTtl().put("mappings", Duration.ofMillis(50));
 		InstanceId id = InstanceId.of("id1");
 		this.cache.put(id, "mappings", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 		this.cache.put(id, "beans", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
-		Thread.sleep(100);
-
-		assertThat(this.cache.get(id, "mappings", null)).isEmpty();
+		Awaitility.await()
+			.atMost(Duration.ofSeconds(5))
+			.untilAsserted(() -> assertThat(this.cache.get(id, "mappings", null)).isEmpty());
 		assertThat(this.cache.get(id, "beans", null)).isPresent();
 	}
 
