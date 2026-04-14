@@ -220,6 +220,14 @@ public class InstanceWebProxy {
 		return entry;
 	}
 
+	/**
+	 * Builds a {@link ClientResponse} from a stored {@link CacheEntry}. The wrapped
+	 * {@link DataBuffer} is backed directly by the cached byte array (no pool
+	 * allocation); the response handler (e.g. {@code writeAndFlushWith}) is responsible
+	 * for releasing it.
+	 * @param entry the cached response entry
+	 * @return a {@link ClientResponse} backed by the cached body bytes
+	 */
 	private ClientResponse buildClientResponse(CacheEntry entry) {
 		DataBuffer body = this.bufferFactory.wrap(entry.getBody());
 		return ClientResponse.create(HttpStatusCode.valueOf(entry.getStatusCode()), this.strategies)
@@ -228,6 +236,16 @@ public class InstanceWebProxy {
 			.build();
 	}
 
+	/**
+	 * Rebuilds a {@link ClientResponse} after body buffering so the response handler can
+	 * consume the same bytes. The wrapped {@link DataBuffer} is backed directly by the
+	 * buffered byte array (no pool allocation); the response handler is responsible for
+	 * releasing it.
+	 * @param statusCode the upstream response status
+	 * @param originalHeaders the unfiltered upstream response headers
+	 * @param bytes the buffered response body
+	 * @return a {@link ClientResponse} backed by the buffered bytes
+	 */
 	private ClientResponse rebuildClientResponse(HttpStatusCode statusCode, HttpHeaders originalHeaders, byte[] bytes) {
 		DataBuffer body = this.bufferFactory.wrap(bytes);
 		return ClientResponse.create(statusCode, this.strategies)
