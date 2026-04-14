@@ -45,6 +45,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import de.codecentric.boot.admin.server.domain.entities.Instance;
 import de.codecentric.boot.admin.server.domain.values.InstanceId;
@@ -159,13 +160,15 @@ public class InstanceWebProxy {
 		HttpMethod method = forwardRequest.getMethod();
 		String endpointId = extractEndpointId(endpointPath);
 
-		Optional<CacheEntry> hit = lookupCache(instanceId, endpointPath, rawQuery, method, endpointId);
-		if (hit.isPresent()) {
-			return responseHandler.apply(buildClientResponse(hit.get()));
-		}
-
-		return forwardUpstream(instance, forwardRequest,
-				(cr) -> interceptResponse(cr, instanceId, endpointPath, rawQuery, endpointId, method, responseHandler));
+		return Mono.fromCallable(() -> lookupCache(instanceId, endpointPath, rawQuery, method, endpointId))
+			.subscribeOn(Schedulers.boundedElastic())
+			.flatMap((hit) -> {
+				if (hit.isPresent()) {
+					return responseHandler.apply(buildClientResponse(hit.get()));
+				}
+				return forwardUpstream(instance, forwardRequest, (cr) -> interceptResponse(cr, instanceId, endpointPath,
+						rawQuery, endpointId, method, responseHandler));
+			});
 	}
 
 	private <V> Mono<V> interceptResponse(ClientResponse clientResponse, InstanceId instanceId, String endpointPath,
@@ -175,7 +178,13 @@ public class InstanceWebProxy {
 
 		if (isMutatingMethod(method) && statusCode.is2xxSuccessful()
 				&& this.cache.shouldCache(HttpMethod.GET, endpointId)) {
-			this.cache.invalidateEndpointForInstance(instanceId, endpointId);
+			return Mono.fromRunnable(() -> this.cache.invalidateEndpointForInstance(instanceId, endpointId))
+				.subscribeOn(Schedulers.boundedElastic())
+				.onErrorResume((ex) -> {
+					log.warn("Failed to invalidate cache for endpoint '{}': {}", endpointId, ex.getMessage());
+					return Mono.empty();
+				})
+				.then(Mono.defer(() -> responseHandler.apply(clientResponse)));
 		}
 
 		if (this.cache.shouldCache(method, endpointId) && statusCode.is2xxSuccessful()) {
@@ -196,6 +205,9 @@ public class InstanceWebProxy {
 					this.cache.getMaxPayloadSize());
 			return responseHandler.apply(clientResponse);
 		}
+		// When Content-Length is unknown (chunked/streamed), we buffer and check size
+		// after joining. Configure maxPayloadSize to avoid transient OOM on large
+		// responses that exceed the caching limit.
 		return DataBufferUtils.join(clientResponse.body(BodyExtractors.toDataBuffers()))
 			.switchIfEmpty(Mono.fromSupplier(() -> this.bufferFactory.allocateBuffer(0)))
 			.flatMap((joined) -> {
@@ -204,9 +216,15 @@ public class InstanceWebProxy {
 				DataBufferUtils.release(joined);
 				if (bytes.length <= this.cache.getMaxPayloadSize()) {
 					HttpHeaders filteredHeaders = this.headerFilter.filterHeaders(originalHeaders);
-					this.cache.put(instanceId, endpointPath, rawQuery,
-							new CacheEntry(statusCode.value(), filteredHeaders, bytes));
-					log.trace("Cached response for endpoint '{}' ({} bytes)", endpointId, bytes.length);
+					CacheEntry entry = new CacheEntry(statusCode.value(), filteredHeaders, bytes);
+					ClientResponse rebuilt = rebuildClientResponse(statusCode, originalHeaders, bytes);
+					return Mono.fromRunnable(() -> {
+						this.cache.put(instanceId, endpointPath, rawQuery, entry);
+						log.trace("Cached response for endpoint '{}' ({} bytes)", endpointId, bytes.length);
+					}).subscribeOn(Schedulers.boundedElastic()).onErrorResume((ex) -> {
+						log.warn("Failed to store cache entry for endpoint '{}': {}", endpointId, ex.getMessage());
+						return Mono.empty();
+					}).then(Mono.defer(() -> responseHandler.apply(rebuilt)));
 				}
 				return responseHandler.apply(rebuildClientResponse(statusCode, originalHeaders, bytes));
 			});
