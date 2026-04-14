@@ -134,14 +134,16 @@ class InMemoryActuatorResponseCacheTest {
 		InstanceId id2 = InstanceId.of("id2");
 		this.cache.put(id1, "mappings", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 		this.cache.put(id1, "mappings/sub", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
+		this.cache.put(id1, "mappings", "page=0", new CacheEntry(200, new HttpHeaders(), new byte[0]));
 		this.cache.put(id1, "beans", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 		this.cache.put(id2, "mappings", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
 		this.cache.invalidateEndpointForInstance(id1, "mappings");
 
-		// mappings (and sub-paths) for id1 are gone
+		// mappings (exact, sub-path and query variant) for id1 are gone
 		assertThat(this.cache.get(id1, "mappings", null)).isEmpty();
 		assertThat(this.cache.get(id1, "mappings/sub", null)).isEmpty();
+		assertThat(this.cache.get(id1, "mappings", "page=0")).isEmpty();
 		// beans for id1 and mappings for id2 are unaffected
 		assertThat(this.cache.get(id1, "beans", null)).isPresent();
 		assertThat(this.cache.get(id2, "mappings", null)).isPresent();

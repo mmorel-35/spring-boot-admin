@@ -88,10 +88,10 @@ public class HazelcastActuatorResponseCache implements ActuatorResponseCache {
 
 	@Override
 	public void invalidateEndpointForInstance(InstanceId instanceId, String endpointId) {
-		String prefix = instanceId.getValue() + ":" + endpointId;
+		String baseKey = instanceId.getValue() + ":" + endpointId;
 		Set<String> keysToRemove = this.map.keySet()
 			.stream()
-			.filter((k) -> k.startsWith(prefix))
+			.filter((k) -> k.equals(baseKey) || k.startsWith(baseKey + "/") || k.startsWith(baseKey + "?"))
 			.collect(Collectors.toSet());
 		keysToRemove.forEach(this.map::delete);
 		if (!keysToRemove.isEmpty()) {
