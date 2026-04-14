@@ -82,7 +82,7 @@ public class InMemoryActuatorResponseCache implements ActuatorResponseCache {
 
 	@Override
 	public void invalidateAllForInstance(InstanceId instanceId) {
-		String prefix = instanceId.getValue() + ":";
+		String prefix = CacheKeyBuilder.instancePrefix(instanceId);
 		boolean removed = this.store.keySet().removeIf((key) -> key.startsWith(prefix));
 		if (removed) {
 			log.debug("Invalidated cache entries for instance {}", instanceId);
@@ -91,7 +91,7 @@ public class InMemoryActuatorResponseCache implements ActuatorResponseCache {
 
 	@Override
 	public void invalidateEndpointForInstance(InstanceId instanceId, String endpointId) {
-		String baseKey = instanceId.getValue() + ":" + endpointId;
+		String baseKey = CacheKeyBuilder.buildKey(instanceId, endpointId, null);
 		String baseKeyWithSlash = baseKey + "/";
 		String baseKeyWithQuery = baseKey + "?";
 		boolean removed = this.store.keySet()
@@ -118,7 +118,7 @@ public class InMemoryActuatorResponseCache implements ActuatorResponseCache {
 	}
 
 	static String buildKey(InstanceId instanceId, String endpointPath, @Nullable String queryString) {
-		return instanceId.getValue() + ":" + endpointPath + ((queryString != null) ? "?" + queryString : "");
+		return CacheKeyBuilder.buildKey(instanceId, endpointPath, queryString);
 	}
 
 	static String extractEndpointId(String endpointPath) {

@@ -22,7 +22,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
-import reactor.core.publisher.Sinks;
+import reactor.test.publisher.TestPublisher;
 
 import de.codecentric.boot.admin.server.config.AdminServerProperties.EndpointCacheProperties;
 import de.codecentric.boot.admin.server.domain.events.InstanceDeregisteredEvent;
@@ -39,7 +39,7 @@ import static org.awaitility.Awaitility.await;
 
 class CacheInvalidationTriggerTest {
 
-	private Sinks.Many<InstanceEvent> eventSink;
+	private TestPublisher<InstanceEvent> events;
 
 	private InMemoryActuatorResponseCache cache;
 
@@ -50,9 +50,12 @@ class CacheInvalidationTriggerTest {
 		EndpointCacheProperties props = new EndpointCacheProperties();
 		props.setDefaultTtl(Duration.ofMinutes(5));
 		this.cache = new InMemoryActuatorResponseCache(props);
-		this.eventSink = Sinks.many().multicast().onBackpressureBuffer();
-		this.trigger = new CacheInvalidationTrigger(this.eventSink.asFlux(), this.cache);
+		this.events = TestPublisher.create();
+		this.trigger = new CacheInvalidationTrigger(this.events.flux(), this.cache);
 		this.trigger.start();
+		// Wait until AbstractEventHandler has subscribed so emitted events are not
+		// dropped
+		await().until(this.events::wasSubscribed);
 	}
 
 	@AfterEach
@@ -65,7 +68,7 @@ class CacheInvalidationTriggerTest {
 		InstanceId id = InstanceId.of("id1");
 		this.cache.put(id, "mappings", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
-		this.eventSink.tryEmitNext(new InstanceDeregisteredEvent(id, 1L));
+		this.events.next(new InstanceDeregisteredEvent(id, 1L));
 
 		await().atMost(Duration.ofMillis(500))
 			.untilAsserted(() -> assertThat(this.cache.get(id, "mappings", null)).isEmpty());
@@ -77,7 +80,7 @@ class CacheInvalidationTriggerTest {
 		Registration reg = Registration.create("app", "http://localhost/mgmt").build();
 		this.cache.put(id, "beans", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
-		this.eventSink.tryEmitNext(new InstanceRegistrationUpdatedEvent(id, 1L, reg));
+		this.events.next(new InstanceRegistrationUpdatedEvent(id, 1L, reg));
 
 		await().atMost(Duration.ofMillis(500))
 			.untilAsserted(() -> assertThat(this.cache.get(id, "beans", null)).isEmpty());
@@ -88,7 +91,7 @@ class CacheInvalidationTriggerTest {
 		InstanceId id = InstanceId.of("id3");
 		this.cache.put(id, "configprops", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
-		this.eventSink.tryEmitNext(new InstanceEndpointsDetectedEvent(id, 1L, Endpoints.empty()));
+		this.events.next(new InstanceEndpointsDetectedEvent(id, 1L, Endpoints.empty()));
 
 		await().atMost(Duration.ofMillis(500))
 			.untilAsserted(() -> assertThat(this.cache.get(id, "configprops", null)).isEmpty());
@@ -100,7 +103,7 @@ class CacheInvalidationTriggerTest {
 		Registration reg = Registration.create("app", "http://localhost/mgmt").build();
 		this.cache.put(id, "mappings", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
 
-		this.eventSink.tryEmitNext(new InstanceRegisteredEvent(id, 1L, reg));
+		this.events.next(new InstanceRegisteredEvent(id, 1L, reg));
 
 		// Wait briefly then assert cache entry is still present
 		await().during(Duration.ofMillis(200))

@@ -191,8 +191,9 @@ class InMemoryActuatorResponseCacheTest {
 		String key1 = InMemoryActuatorResponseCache.buildKey(InstanceId.of("abc"), "sbom/application", null);
 		String key2 = InMemoryActuatorResponseCache.buildKey(InstanceId.of("abc"), "sbom/application", "format=spdx");
 
-		assertThat(key1).isEqualTo("abc:sbom/application");
-		assertThat(key2).isEqualTo("abc:sbom/application?format=spdx");
+		String expectedPrefix = CacheKeyBuilder.instancePrefix(InstanceId.of("abc"));
+		assertThat(key1).isEqualTo(expectedPrefix + "sbom/application");
+		assertThat(key2).isEqualTo(expectedPrefix + "sbom/application?format=spdx");
 	}
 
 }
