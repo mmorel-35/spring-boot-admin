@@ -166,6 +166,11 @@ public class InstanceWebProxy {
 
 		return Mono.fromCallable(() -> lookupCache(instanceId, endpointPath, rawQuery, method, endpointId))
 			.subscribeOn(Schedulers.boundedElastic())
+			.onErrorResume((ex) -> {
+				log.warn("Cache lookup failed for instance '{}' endpoint '{}', falling back to upstream", instanceId,
+						endpointId, ex);
+				return Mono.just(Optional.empty());
+			})
 			.flatMap((hit) -> {
 				if (hit.isPresent()) {
 					return responseHandler.apply(buildClientResponse(hit.get()));
