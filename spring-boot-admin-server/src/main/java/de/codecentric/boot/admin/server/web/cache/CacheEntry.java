@@ -77,11 +77,22 @@ public final class CacheEntry implements Serializable {
 	}
 
 	/**
-	 * Returns a defensive copy of the cached body bytes.
+	 * Returns a defensive copy of the cached body bytes. Callers that only need a
+	 * read-only view of the body should prefer {@link #getBodyRef()} to avoid an
+	 * unnecessary array copy.
 	 * @return defensive copy of the body bytes
 	 */
 	public byte[] getBody() {
 		return this.body.clone();
+	}
+
+	/**
+	 * Returns a direct reference to the internal body byte array. The caller <strong>must
+	 * not</strong> modify the returned array; doing so would corrupt the cached entry.
+	 * @return the internal body byte array (read-only)
+	 */
+	public byte[] getBodyRef() {
+		return this.body;
 	}
 
 	/**

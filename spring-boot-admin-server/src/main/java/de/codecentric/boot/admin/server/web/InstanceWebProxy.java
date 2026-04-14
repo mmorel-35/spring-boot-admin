@@ -71,7 +71,11 @@ import static org.springframework.http.HttpMethod.PUT;
  * {@link HttpHeaderFilter}) the proxy transparently:
  * <ol>
  * <li>Returns a stored entry on a GET cache-hit without touching upstream.</li>
- * <li>Buffers and caches a 2xx GET response body for subsequent requests.</li>
+ * <li>Buffers and caches a 2xx GET response body when the response carries a known
+ * {@code Content-Length} that is within the configured
+ * {@link ActuatorResponseCache#getMaxPayloadSize() maxPayloadSize}. Responses with an
+ * unknown {@code Content-Length} (e.g. chunked/streaming) are forwarded as-is and not
+ * cached.</li>
  * <li>Invalidates the endpoint's cached entries after a successful mutating request
  * (POST/PUT/PATCH/DELETE).</li>
  * </ol>
@@ -251,14 +255,14 @@ public class InstanceWebProxy {
 
 	/**
 	 * Builds a {@link ClientResponse} from a stored {@link CacheEntry}. The wrapped
-	 * {@link DataBuffer} is backed directly by the cached byte array (no pool
+	 * {@link DataBuffer} is a read-only view of the cached byte array (no copy, no pool
 	 * allocation); the response handler (e.g. {@code writeAndFlushWith}) is responsible
 	 * for releasing it.
 	 * @param entry the cached response entry
 	 * @return a {@link ClientResponse} backed by the cached body bytes
 	 */
 	private ClientResponse buildClientResponse(CacheEntry entry) {
-		DataBuffer body = this.bufferFactory.wrap(entry.getBody());
+		DataBuffer body = this.bufferFactory.wrap(entry.getBodyRef());
 		return ClientResponse.create(HttpStatusCode.valueOf(entry.getStatusCode()), this.strategies)
 			.headers((h) -> h.addAll(entry.getHttpHeaders()))
 			.body(Flux.just(body))

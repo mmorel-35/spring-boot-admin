@@ -18,6 +18,7 @@ package de.codecentric.boot.admin.server.web.cache;
 
 import java.time.Duration;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -52,6 +53,11 @@ class CacheInvalidationTriggerTest {
 		this.eventSink = Sinks.many().multicast().onBackpressureBuffer();
 		this.trigger = new CacheInvalidationTrigger(this.eventSink.asFlux(), this.cache);
 		this.trigger.start();
+	}
+
+	@AfterEach
+	void tearDown() {
+		this.trigger.stop();
 	}
 
 	@Test

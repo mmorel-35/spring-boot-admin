@@ -16,6 +16,7 @@
 
 package de.codecentric.boot.admin.server.web;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -323,7 +324,8 @@ public abstract class AbstractInstancesProxyControllerIntegrationTest {
 			.willReturn(ok("{ \"foo\" : \"bar\" }").withHeader(CONTENT_TYPE, ACTUATOR_CONTENT_TYPE)));
 		this.wireMock.stubFor(get(urlEqualTo(managementPath + "/mappings"))
 			.willReturn(ok("{ \"contexts\": {} }").withHeader(CONTENT_TYPE, ACTUATOR_CONTENT_TYPE)
-				.withHeader(CONTENT_LENGTH, String.valueOf("{ \"contexts\": {} }".length()))));
+				.withHeader(CONTENT_LENGTH,
+						String.valueOf("{ \"contexts\": {} }".getBytes(StandardCharsets.UTF_8).length))));
 		this.wireMock.stubFor(get(urlEqualTo(managementPath + "/test/has%20spaces"))
 			.willReturn(ok("{ \"foo\" : \"bar-with-spaces\" }").withHeader(CONTENT_TYPE, ACTUATOR_CONTENT_TYPE)));
 		this.wireMock.stubFor(post(urlEqualTo(managementPath + "/post")).willReturn(ok()));
