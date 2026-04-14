@@ -76,7 +76,7 @@ public class HazelcastActuatorResponseCache implements ActuatorResponseCache {
 	@Override
 	public void invalidateAllForInstance(InstanceId instanceId) {
 		String prefix = instanceId.getValue() + ":";
-		Predicate<String, CacheEntry> predicate = Predicates.sql("__key LIKE '" + prefix + "%'");
+		Predicate<String, CacheEntry> predicate = Predicates.like("__key", prefix + "%");
 		this.map.removeAll(predicate);
 		log.debug("Invalidated Hazelcast cache entries for instance {}", instanceId);
 	}
@@ -85,7 +85,7 @@ public class HazelcastActuatorResponseCache implements ActuatorResponseCache {
 	public void invalidateEndpointForInstance(InstanceId instanceId, String endpointId) {
 		String baseKey = instanceId.getValue() + ":" + endpointId;
 		Predicate<String, CacheEntry> predicate = Predicates.or(Predicates.equal("__key", baseKey),
-				Predicates.sql("__key LIKE '" + baseKey + "/%'"), Predicates.sql("__key LIKE '" + baseKey + "?%'"));
+				Predicates.like("__key", baseKey + "/%"), Predicates.like("__key", baseKey + "?%"));
 		this.map.removeAll(predicate);
 		log.debug("Invalidated Hazelcast cache entries for instance {} endpoint '{}'", instanceId, endpointId);
 	}
