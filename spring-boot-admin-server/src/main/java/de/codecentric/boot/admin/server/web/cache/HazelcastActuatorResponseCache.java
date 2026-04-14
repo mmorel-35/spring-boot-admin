@@ -17,7 +17,9 @@
 package de.codecentric.boot.admin.server.web.cache;
 
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import com.hazelcast.map.IMap;
 import org.jspecify.annotations.Nullable;
@@ -74,9 +76,27 @@ public class HazelcastActuatorResponseCache implements ActuatorResponseCache {
 	@Override
 	public void invalidateAllForInstance(InstanceId instanceId) {
 		String prefix = instanceId.getValue() + ":";
-		long removed = this.map.keySet().stream().filter((k) -> k.startsWith(prefix)).peek(this.map::delete).count();
-		if (removed > 0) {
-			log.debug("Invalidated {} Hazelcast cache entries for instance {}", removed, instanceId);
+		Set<String> keysToRemove = this.map.keySet()
+			.stream()
+			.filter((k) -> k.startsWith(prefix))
+			.collect(Collectors.toSet());
+		keysToRemove.forEach(this.map::delete);
+		if (!keysToRemove.isEmpty()) {
+			log.debug("Invalidated {} Hazelcast cache entries for instance {}", keysToRemove.size(), instanceId);
+		}
+	}
+
+	@Override
+	public void invalidateEndpointForInstance(InstanceId instanceId, String endpointId) {
+		String prefix = instanceId.getValue() + ":" + endpointId;
+		Set<String> keysToRemove = this.map.keySet()
+			.stream()
+			.filter((k) -> k.startsWith(prefix))
+			.collect(Collectors.toSet());
+		keysToRemove.forEach(this.map::delete);
+		if (!keysToRemove.isEmpty()) {
+			log.debug("Invalidated {} Hazelcast cache entries for instance {} endpoint '{}'", keysToRemove.size(),
+					instanceId, endpointId);
 		}
 	}
 

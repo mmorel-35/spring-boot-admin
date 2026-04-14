@@ -129,6 +129,25 @@ class InMemoryActuatorResponseCacheTest {
 	}
 
 	@Test
+	void should_invalidate_single_endpoint_for_instance() {
+		InstanceId id1 = InstanceId.of("id1");
+		InstanceId id2 = InstanceId.of("id2");
+		this.cache.put(id1, "mappings", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
+		this.cache.put(id1, "mappings/sub", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
+		this.cache.put(id1, "beans", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
+		this.cache.put(id2, "mappings", null, new CacheEntry(200, new HttpHeaders(), new byte[0]));
+
+		this.cache.invalidateEndpointForInstance(id1, "mappings");
+
+		// mappings (and sub-paths) for id1 are gone
+		assertThat(this.cache.get(id1, "mappings", null)).isEmpty();
+		assertThat(this.cache.get(id1, "mappings/sub", null)).isEmpty();
+		// beans for id1 and mappings for id2 are unaffected
+		assertThat(this.cache.get(id1, "beans", null)).isPresent();
+		assertThat(this.cache.get(id2, "mappings", null)).isPresent();
+	}
+
+	@Test
 	void should_not_cache_when_disabled() {
 		this.props.setEnabled(false);
 		InstanceId id = InstanceId.of("id1");

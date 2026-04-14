@@ -68,6 +68,21 @@ public interface ActuatorResponseCache {
 	void invalidateAllForInstance(InstanceId instanceId);
 
 	/**
+	 * Invalidates all cached entries for the given instance and endpoint. Called after a
+	 * successful mutating request (POST/PUT/PATCH/DELETE) so that the next GET returns
+	 * fresh data.
+	 * <p>
+	 * The default implementation falls back to {@link #invalidateAllForInstance}, which
+	 * is always safe but overly broad. Implementations are encouraged to override this
+	 * with a targeted eviction.
+	 * @param instanceId the registered instance
+	 * @param endpointId first path segment of the actuator path (e.g. {@code "loggers"})
+	 */
+	default void invalidateEndpointForInstance(InstanceId instanceId, String endpointId) {
+		invalidateAllForInstance(instanceId);
+	}
+
+	/**
 	 * Returns {@code true} if a response for the given HTTP method and endpoint id should
 	 * be looked up from / stored in the cache. Implementations use this to enforce the
 	 * configured endpoint inclusion list and restrict caching to safe HTTP methods (GET).

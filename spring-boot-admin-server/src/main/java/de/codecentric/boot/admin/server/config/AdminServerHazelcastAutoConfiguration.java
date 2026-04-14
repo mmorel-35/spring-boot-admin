@@ -64,7 +64,7 @@ public class AdminServerHazelcastAutoConfiguration {
 	@Value("${spring.boot.admin.hazelcast.event-store:" + DEFAULT_NAME_EVENT_STORE_MAP + "}")
 	private final String nameEventStoreMap = DEFAULT_NAME_EVENT_STORE_MAP;
 
-	@Value("${spring.boot.admin.hazelcast.response-cache-map:" + DEFAULT_NAME_RESPONSE_CACHE_MAP + "}")
+	@Value("${spring.boot.admin.hazelcast.response-cache:" + DEFAULT_NAME_RESPONSE_CACHE_MAP + "}")
 	private final String nameResponseCacheMap = DEFAULT_NAME_RESPONSE_CACHE_MAP;
 
 	@Bean
@@ -76,6 +76,7 @@ public class AdminServerHazelcastAutoConfiguration {
 
 	@Bean
 	@ConditionalOnMissingBean(ActuatorResponseCache.class)
+	@ConditionalOnProperty(prefix = "spring.boot.admin.endpoint-cache", name = "enabled", matchIfMissing = true)
 	public HazelcastActuatorResponseCache actuatorResponseCache(HazelcastInstance hazelcastInstance,
 			AdminServerProperties properties) {
 		IMap<String, CacheEntry> map = hazelcastInstance.getMap(this.nameResponseCacheMap);

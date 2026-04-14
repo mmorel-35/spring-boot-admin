@@ -83,15 +83,18 @@ public class InMemoryActuatorResponseCache implements ActuatorResponseCache {
 	@Override
 	public void invalidateAllForInstance(InstanceId instanceId) {
 		String prefix = instanceId.getValue() + ":";
-		int removed = 0;
-		for (String key : this.store.keySet()) {
-			if (key.startsWith(prefix)) {
-				this.store.remove(key);
-				removed++;
-			}
+		boolean removed = this.store.keySet().removeIf((key) -> key.startsWith(prefix));
+		if (removed) {
+			log.debug("Invalidated cache entries for instance {}", instanceId);
 		}
-		if (removed > 0) {
-			log.debug("Invalidated {} cache entries for instance {}", removed, instanceId);
+	}
+
+	@Override
+	public void invalidateEndpointForInstance(InstanceId instanceId, String endpointId) {
+		String prefix = instanceId.getValue() + ":" + endpointId;
+		boolean removed = this.store.keySet().removeIf((key) -> key.startsWith(prefix));
+		if (removed) {
+			log.debug("Invalidated cache entries for instance {} endpoint '{}'", instanceId, endpointId);
 		}
 	}
 

@@ -21,7 +21,7 @@
       "defaultValue": "spring-boot-admin-sent-notifications"
     },
     {
-      "name": "spring.boot.admin.hazelcast.response-cache-map",
+      "name": "spring.boot.admin.hazelcast.response-cache",
       "type": "java.lang.String",
       "description": "Name of the Hazelcast IMap used as the shared actuator response cache across cluster nodes.",
       "defaultValue": "spring-boot-admin-actuator-response-cache"

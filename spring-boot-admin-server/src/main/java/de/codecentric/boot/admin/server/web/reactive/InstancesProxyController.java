@@ -28,6 +28,7 @@ import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
@@ -130,6 +131,15 @@ public class InstancesProxyController {
 							&& this.responseCache.shouldCache(request.getMethod(), endpointId)
 							&& statusCode.is2xxSuccessful();
 
+					// After a successful mutating request, evict that endpoint's cache
+					// entries
+					// so the next GET returns fresh data.
+					if (this.responseCache != null && isMutatingMethod(request.getMethod())
+							&& statusCode.is2xxSuccessful()
+							&& this.responseCache.shouldCache(HttpMethod.GET, endpointId)) {
+						this.responseCache.invalidateEndpointForInstance(InstanceId.of(instanceId), endpointId);
+					}
+
 					if (fillCache) {
 						InstanceId id = InstanceId.of(instanceId);
 						return DataBufferUtils.join(clientResponse.body(BodyExtractors.toDataBuffers()))
@@ -197,6 +207,11 @@ public class InstancesProxyController {
 	private static String extractEndpointId(String localPath) {
 		int slash = localPath.indexOf('/');
 		return (slash > 0) ? localPath.substring(0, slash) : localPath;
+	}
+
+	private static boolean isMutatingMethod(HttpMethod method) {
+		return HttpMethod.POST.equals(method) || HttpMethod.PUT.equals(method) || HttpMethod.PATCH.equals(method)
+				|| HttpMethod.DELETE.equals(method);
 	}
 
 }
