@@ -37,6 +37,8 @@ import de.codecentric.boot.admin.server.services.ApplicationRegistry;
 import de.codecentric.boot.admin.server.services.InstanceRegistry;
 import de.codecentric.boot.admin.server.utils.jackson.AdminServerModule;
 import de.codecentric.boot.admin.server.web.ApplicationsController;
+import de.codecentric.boot.admin.server.web.HttpHeaderFilter;
+import de.codecentric.boot.admin.server.web.InstanceWebProxy;
 import de.codecentric.boot.admin.server.web.InstancesController;
 import de.codecentric.boot.admin.server.web.cache.ActuatorResponseCache;
 import de.codecentric.boot.admin.server.web.cache.CacheInvalidationTrigger;
@@ -100,10 +102,12 @@ public class AdminServerWebConfiguration {
 		public de.codecentric.boot.admin.server.web.reactive.InstancesProxyController instancesProxyController(
 				InstanceRegistry instanceRegistry, InstanceWebClient.Builder instanceWebClientBuilder,
 				ObjectProvider<ActuatorResponseCache> responseCache) {
+			HttpHeaderFilter headerFilter = new HttpHeaderFilter(
+					this.adminServerProperties.getInstanceProxy().getIgnoredHeaders());
+			InstanceWebProxy instanceWebProxy = new InstanceWebProxy(instanceWebClientBuilder.build(),
+					responseCache.getIfAvailable(), headerFilter);
 			return new de.codecentric.boot.admin.server.web.reactive.InstancesProxyController(
-					this.adminServerProperties.getContextPath(),
-					this.adminServerProperties.getInstanceProxy().getIgnoredHeaders(), instanceRegistry,
-					instanceWebClientBuilder.build(), responseCache.getIfAvailable());
+					this.adminServerProperties.getContextPath(), headerFilter, instanceRegistry, instanceWebProxy);
 		}
 
 		@Bean
@@ -134,10 +138,12 @@ public class AdminServerWebConfiguration {
 		public de.codecentric.boot.admin.server.web.servlet.InstancesProxyController instancesProxyController(
 				InstanceRegistry instanceRegistry, InstanceWebClient.Builder instanceWebClientBuilder,
 				ObjectProvider<ActuatorResponseCache> responseCache) {
+			HttpHeaderFilter headerFilter = new HttpHeaderFilter(
+					this.adminServerProperties.getInstanceProxy().getIgnoredHeaders());
+			InstanceWebProxy instanceWebProxy = new InstanceWebProxy(instanceWebClientBuilder.build(),
+					responseCache.getIfAvailable(), headerFilter);
 			return new de.codecentric.boot.admin.server.web.servlet.InstancesProxyController(
-					this.adminServerProperties.getContextPath(),
-					this.adminServerProperties.getInstanceProxy().getIgnoredHeaders(), instanceRegistry,
-					instanceWebClientBuilder.build(), responseCache.getIfAvailable());
+					this.adminServerProperties.getContextPath(), headerFilter, instanceRegistry, instanceWebProxy);
 		}
 
 		@Bean

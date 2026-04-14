@@ -17,7 +17,6 @@
 package de.codecentric.boot.admin.server.web.reactive;
 
 import java.net.URI;
-import java.util.Set;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.io.buffer.DataBuffer;
@@ -44,8 +43,6 @@ import de.codecentric.boot.admin.server.services.InstanceRegistry;
 import de.codecentric.boot.admin.server.web.AdminController;
 import de.codecentric.boot.admin.server.web.HttpHeaderFilter;
 import de.codecentric.boot.admin.server.web.InstanceWebProxy;
-import de.codecentric.boot.admin.server.web.cache.ActuatorResponseCache;
-import de.codecentric.boot.admin.server.web.client.InstanceWebClient;
 
 /**
  * Http Handler for proxied requests
@@ -69,17 +66,12 @@ public class InstancesProxyController {
 
 	private final HttpHeaderFilter httpHeadersFilter;
 
-	public InstancesProxyController(String adminContextPath, Set<String> ignoredHeaders, InstanceRegistry registry,
-			InstanceWebClient instanceWebClient) {
-		this(adminContextPath, ignoredHeaders, registry, instanceWebClient, null);
-	}
-
-	public InstancesProxyController(String adminContextPath, Set<String> ignoredHeaders, InstanceRegistry registry,
-			InstanceWebClient instanceWebClient, @Nullable ActuatorResponseCache responseCache) {
+	public InstancesProxyController(String adminContextPath, HttpHeaderFilter httpHeadersFilter,
+			InstanceRegistry registry, InstanceWebProxy instanceWebProxy) {
 		this.adminContextPath = adminContextPath;
+		this.httpHeadersFilter = httpHeadersFilter;
 		this.registry = registry;
-		this.httpHeadersFilter = new HttpHeaderFilter(ignoredHeaders);
-		this.instanceWebProxy = new InstanceWebProxy(instanceWebClient, responseCache, this.httpHeadersFilter);
+		this.instanceWebProxy = instanceWebProxy;
 	}
 
 	@RequestMapping(path = INSTANCE_MAPPED_PATH, method = { RequestMethod.GET, RequestMethod.HEAD, RequestMethod.POST,
