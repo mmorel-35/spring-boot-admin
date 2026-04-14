@@ -16,6 +16,7 @@
 
 package de.codecentric.boot.admin.server.web.cache;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
 
@@ -55,7 +56,7 @@ class InMemoryActuatorResponseCacheTest {
 		InstanceId id = InstanceId.of("id1");
 		HttpHeaders headers = new HttpHeaders();
 		headers.setContentType(MediaType.APPLICATION_JSON);
-		byte[] body = "{\"foo\":\"bar\"}".getBytes();
+		byte[] body = "{\"foo\":\"bar\"}".getBytes(StandardCharsets.UTF_8);
 		CacheEntry entry = new CacheEntry(200, headers, body);
 
 		this.cache.put(id, "mappings", null, entry);
@@ -70,19 +71,19 @@ class InMemoryActuatorResponseCacheTest {
 	@Test
 	void should_treat_query_string_as_part_of_key() {
 		InstanceId id = InstanceId.of("id1");
-		CacheEntry entry1 = new CacheEntry(200, new HttpHeaders(), "body1".getBytes());
-		CacheEntry entry2 = new CacheEntry(200, new HttpHeaders(), "body2".getBytes());
+		CacheEntry entry1 = new CacheEntry(200, new HttpHeaders(), "body1".getBytes(StandardCharsets.UTF_8));
+		CacheEntry entry2 = new CacheEntry(200, new HttpHeaders(), "body2".getBytes(StandardCharsets.UTF_8));
 
 		this.cache.put(id, "beans", "foo=bar", entry1);
 		this.cache.put(id, "beans", "foo=baz", entry2);
 
 		assertThat(this.cache.get(id, "beans", "foo=bar")).isPresent()
 			.get()
-			.extracting((e) -> new String(e.getBody()))
+			.extracting((e) -> new String(e.getBody(), StandardCharsets.UTF_8))
 			.isEqualTo("body1");
 		assertThat(this.cache.get(id, "beans", "foo=baz")).isPresent()
 			.get()
-			.extracting((e) -> new String(e.getBody()))
+			.extracting((e) -> new String(e.getBody(), StandardCharsets.UTF_8))
 			.isEqualTo("body2");
 		assertThat(this.cache.get(id, "beans", null)).isEmpty();
 	}

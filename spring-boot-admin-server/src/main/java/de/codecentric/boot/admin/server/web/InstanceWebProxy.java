@@ -181,7 +181,8 @@ public class InstanceWebProxy {
 			return Mono.fromRunnable(() -> this.cache.invalidateEndpointForInstance(instanceId, endpointId))
 				.subscribeOn(Schedulers.boundedElastic())
 				.onErrorResume((ex) -> {
-					log.warn("Failed to invalidate cache for endpoint '{}': {}", endpointId, ex.getMessage());
+					log.warn("Failed to invalidate cache for instance '{}' and endpoint '{}'", instanceId, endpointId,
+							ex);
 					return Mono.empty();
 				})
 				.then(Mono.defer(() -> responseHandler.apply(clientResponse)));
@@ -200,33 +201,34 @@ public class InstanceWebProxy {
 			Function<ClientResponse, Mono<V>> responseHandler) {
 		HttpHeaders originalHeaders = clientResponse.headers().asHttpHeaders();
 		long contentLength = originalHeaders.getContentLength();
+		if (contentLength < 0) {
+			log.trace("Skipping cache for endpoint '{}': Content-Length is unknown", endpointId);
+			return responseHandler.apply(clientResponse);
+		}
 		if (contentLength > this.cache.getMaxPayloadSize()) {
 			log.trace("Skipping cache for endpoint '{}': Content-Length {} exceeds limit {}", endpointId, contentLength,
 					this.cache.getMaxPayloadSize());
 			return responseHandler.apply(clientResponse);
 		}
-		// When Content-Length is unknown (chunked/streamed), we buffer and check size
-		// after joining. Configure maxPayloadSize to avoid transient OOM on large
-		// responses that exceed the caching limit.
+		// Content-Length is known and within the cache limit, so buffering the body for
+		// caching is bounded by maxPayloadSize.
 		return DataBufferUtils.join(clientResponse.body(BodyExtractors.toDataBuffers()))
 			.switchIfEmpty(Mono.fromSupplier(() -> this.bufferFactory.allocateBuffer(0)))
 			.flatMap((joined) -> {
 				byte[] bytes = new byte[joined.readableByteCount()];
 				joined.read(bytes);
 				DataBufferUtils.release(joined);
-				if (bytes.length <= this.cache.getMaxPayloadSize()) {
-					HttpHeaders filteredHeaders = this.headerFilter.filterHeaders(originalHeaders);
-					CacheEntry entry = new CacheEntry(statusCode.value(), filteredHeaders, bytes);
-					ClientResponse rebuilt = rebuildClientResponse(statusCode, originalHeaders, bytes);
-					return Mono.fromRunnable(() -> {
-						this.cache.put(instanceId, endpointPath, rawQuery, entry);
-						log.trace("Cached response for endpoint '{}' ({} bytes)", endpointId, bytes.length);
-					}).subscribeOn(Schedulers.boundedElastic()).onErrorResume((ex) -> {
-						log.warn("Failed to store cache entry for endpoint '{}': {}", endpointId, ex.getMessage());
-						return Mono.empty();
-					}).then(Mono.defer(() -> responseHandler.apply(rebuilt)));
-				}
-				return responseHandler.apply(rebuildClientResponse(statusCode, originalHeaders, bytes));
+				// Content-Length was verified before joining, so bytes.length is bounded.
+				HttpHeaders filteredHeaders = this.headerFilter.filterHeaders(originalHeaders);
+				CacheEntry entry = new CacheEntry(statusCode.value(), filteredHeaders, bytes);
+				ClientResponse rebuilt = rebuildClientResponse(statusCode, originalHeaders, bytes);
+				return Mono.fromRunnable(() -> {
+					this.cache.put(instanceId, endpointPath, rawQuery, entry);
+					log.trace("Cached response for endpoint '{}' ({} bytes)", endpointId, bytes.length);
+				}).subscribeOn(Schedulers.boundedElastic()).onErrorResume((ex) -> {
+					log.warn("Failed to store cache entry for endpoint '{}'", endpointId, ex);
+					return Mono.empty();
+				}).then(Mono.defer(() -> responseHandler.apply(rebuilt)));
 			});
 	}
 

@@ -55,6 +55,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.serverError;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.HttpHeaders.ALLOW;
+import static org.springframework.http.HttpHeaders.CONTENT_LENGTH;
 import static org.springframework.http.HttpHeaders.CONTENT_TYPE;
 
 public abstract class AbstractInstancesProxyControllerIntegrationTest {
@@ -321,7 +322,8 @@ public abstract class AbstractInstancesProxyControllerIntegrationTest {
 		this.wireMock.stubFor(get(urlEqualTo(managementPath + "/test"))
 			.willReturn(ok("{ \"foo\" : \"bar\" }").withHeader(CONTENT_TYPE, ACTUATOR_CONTENT_TYPE)));
 		this.wireMock.stubFor(get(urlEqualTo(managementPath + "/mappings"))
-			.willReturn(ok("{ \"contexts\": {} }").withHeader(CONTENT_TYPE, ACTUATOR_CONTENT_TYPE)));
+			.willReturn(ok("{ \"contexts\": {} }").withHeader(CONTENT_TYPE, ACTUATOR_CONTENT_TYPE)
+				.withHeader(CONTENT_LENGTH, String.valueOf("{ \"contexts\": {} }".length()))));
 		this.wireMock.stubFor(get(urlEqualTo(managementPath + "/test/has%20spaces"))
 			.willReturn(ok("{ \"foo\" : \"bar-with-spaces\" }").withHeader(CONTENT_TYPE, ACTUATOR_CONTENT_TYPE)));
 		this.wireMock.stubFor(post(urlEqualTo(managementPath + "/post")).willReturn(ok()));

@@ -62,10 +62,10 @@ public class AdminServerHazelcastAutoConfiguration {
 	public static final String DEFAULT_NAME_RESPONSE_CACHE_MAP = "spring-boot-admin-actuator-response-cache";
 
 	@Value("${spring.boot.admin.hazelcast.event-store:" + DEFAULT_NAME_EVENT_STORE_MAP + "}")
-	private final String nameEventStoreMap = DEFAULT_NAME_EVENT_STORE_MAP;
+	private String nameEventStoreMap = DEFAULT_NAME_EVENT_STORE_MAP;
 
 	@Value("${spring.boot.admin.hazelcast.response-cache:" + DEFAULT_NAME_RESPONSE_CACHE_MAP + "}")
-	private final String nameResponseCacheMap = DEFAULT_NAME_RESPONSE_CACHE_MAP;
+	private String nameResponseCacheMap = DEFAULT_NAME_RESPONSE_CACHE_MAP;
 
 	@Bean
 	@ConditionalOnMissingBean(InstanceEventStore.class)
@@ -88,7 +88,7 @@ public class AdminServerHazelcastAutoConfiguration {
 	public static class NotifierTriggerConfiguration {
 
 		@Value("${spring.boot.admin.hazelcast.sent-notifications:" + DEFAULT_NAME_SENT_NOTIFICATIONS_MAP + "}")
-		private final String nameSentNotificationsMap = DEFAULT_NAME_SENT_NOTIFICATIONS_MAP;
+		private String nameSentNotificationsMap = DEFAULT_NAME_SENT_NOTIFICATIONS_MAP;
 
 		@Bean(initMethod = "start", destroyMethod = "stop")
 		@ConditionalOnMissingBean(NotificationTrigger.class)
