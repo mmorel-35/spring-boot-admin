@@ -92,8 +92,11 @@ public class InMemoryActuatorResponseCache implements ActuatorResponseCache {
 	@Override
 	public void invalidateEndpointForInstance(InstanceId instanceId, String endpointId) {
 		String baseKey = instanceId.getValue() + ":" + endpointId;
+		String baseKeyWithSlash = baseKey + "/";
+		String baseKeyWithQuery = baseKey + "?";
 		boolean removed = this.store.keySet()
-			.removeIf((key) -> key.equals(baseKey) || key.startsWith(baseKey + "/") || key.startsWith(baseKey + "?"));
+			.removeIf((key) -> key.equals(baseKey) || key.startsWith(baseKeyWithSlash)
+					|| key.startsWith(baseKeyWithQuery));
 		if (removed) {
 			log.debug("Invalidated cache entries for instance {} endpoint '{}'", instanceId, endpointId);
 		}
