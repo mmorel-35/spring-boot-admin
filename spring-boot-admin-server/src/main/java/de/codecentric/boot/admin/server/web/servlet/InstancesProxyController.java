@@ -51,7 +51,6 @@ import reactor.core.publisher.Mono;
 import de.codecentric.boot.admin.server.domain.values.InstanceId;
 import de.codecentric.boot.admin.server.services.InstanceRegistry;
 import de.codecentric.boot.admin.server.web.AdminController;
-import de.codecentric.boot.admin.server.web.CachingInstanceWebProxy;
 import de.codecentric.boot.admin.server.web.HttpHeaderFilter;
 import de.codecentric.boot.admin.server.web.InstanceWebProxy;
 import de.codecentric.boot.admin.server.web.cache.ActuatorResponseCache;
@@ -71,7 +70,7 @@ public class InstancesProxyController {
 
 	private final PathMatcher pathMatcher = new AntPathMatcher();
 
-	private final CachingInstanceWebProxy instanceWebProxy;
+	private final InstanceWebProxy instanceWebProxy;
 
 	private final HttpHeaderFilter httpHeadersFilter;
 
@@ -89,8 +88,7 @@ public class InstancesProxyController {
 		this.adminContextPath = adminContextPath;
 		this.registry = registry;
 		this.httpHeadersFilter = new HttpHeaderFilter(ignoredHeaders);
-		this.instanceWebProxy = new CachingInstanceWebProxy(new InstanceWebProxy(instanceWebClient), responseCache,
-				this.httpHeadersFilter);
+		this.instanceWebProxy = new InstanceWebProxy(instanceWebClient, responseCache, this.httpHeadersFilter);
 	}
 
 	@ResponseBody
@@ -117,7 +115,7 @@ public class InstancesProxyController {
 					rawQuery);
 
 			this.instanceWebProxy
-				.forward(id, this.registry.getInstance(id), fwdRequest,
+				.forward(this.registry.getInstance(id), fwdRequest,
 						(clientResponse) -> writeProxiedResponse(clientResponse, asyncContext))
 				// We need to explicitly block so the headers are received and written
 				// before any async dispatch otherwise the FrameworkServlet will add

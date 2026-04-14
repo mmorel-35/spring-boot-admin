@@ -42,7 +42,6 @@ import reactor.core.publisher.Mono;
 import de.codecentric.boot.admin.server.domain.values.InstanceId;
 import de.codecentric.boot.admin.server.services.InstanceRegistry;
 import de.codecentric.boot.admin.server.web.AdminController;
-import de.codecentric.boot.admin.server.web.CachingInstanceWebProxy;
 import de.codecentric.boot.admin.server.web.HttpHeaderFilter;
 import de.codecentric.boot.admin.server.web.InstanceWebProxy;
 import de.codecentric.boot.admin.server.web.cache.ActuatorResponseCache;
@@ -64,7 +63,7 @@ public class InstancesProxyController {
 
 	private final InstanceRegistry registry;
 
-	private final CachingInstanceWebProxy instanceWebProxy;
+	private final InstanceWebProxy instanceWebProxy;
 
 	private final String adminContextPath;
 
@@ -80,8 +79,7 @@ public class InstancesProxyController {
 		this.adminContextPath = adminContextPath;
 		this.registry = registry;
 		this.httpHeadersFilter = new HttpHeaderFilter(ignoredHeaders);
-		this.instanceWebProxy = new CachingInstanceWebProxy(new InstanceWebProxy(instanceWebClient), responseCache,
-				this.httpHeadersFilter);
+		this.instanceWebProxy = new InstanceWebProxy(instanceWebClient, responseCache, this.httpHeadersFilter);
 	}
 
 	@RequestMapping(path = INSTANCE_MAPPED_PATH, method = { RequestMethod.GET, RequestMethod.HEAD, RequestMethod.POST,
@@ -94,7 +92,7 @@ public class InstancesProxyController {
 
 		InstanceWebProxy.ForwardRequest fwdRequest = createForwardRequest(request, request.getBody(), localPath,
 				rawQuery);
-		return this.instanceWebProxy.forward(id, this.registry.getInstance(id), fwdRequest,
+		return this.instanceWebProxy.forward(this.registry.getInstance(id), fwdRequest,
 				(clientResponse) -> writeProxiedResponse(clientResponse, response));
 	}
 

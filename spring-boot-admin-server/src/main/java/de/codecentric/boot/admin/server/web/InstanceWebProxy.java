@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2023 the original author or authors.
+ * Copyright 2014-2026 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package de.codecentric.boot.admin.server.web;
 import java.io.IOException;
 import java.net.URI;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 
@@ -27,10 +28,16 @@ import io.netty.handler.timeout.ReadTimeoutException;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferFactory;
+import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.reactive.ClientHttpRequest;
+import org.springframework.web.reactive.function.BodyExtractors;
 import org.springframework.web.reactive.function.BodyInserter;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
@@ -41,6 +48,8 @@ import reactor.core.publisher.Mono;
 
 import de.codecentric.boot.admin.server.domain.entities.Instance;
 import de.codecentric.boot.admin.server.domain.values.InstanceId;
+import de.codecentric.boot.admin.server.web.cache.ActuatorResponseCache;
+import de.codecentric.boot.admin.server.web.cache.CacheEntry;
 import de.codecentric.boot.admin.server.web.client.InstanceWebClient;
 import de.codecentric.boot.admin.server.web.client.exception.ResolveEndpointException;
 
@@ -49,9 +58,23 @@ import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.http.HttpMethod.PUT;
 
 /**
- * Forwards a request to a single instances endpoint and will respond with: - 502 (Bad
- * Gateway) when any error occurs during the request - 503 (Service unavailable) when the
- * instance is not found - 504 (Gateway timeout) when the request exceeds the timeout
+ * Forwards a request to a single instances endpoint and will respond with:
+ * <ul>
+ * <li>502 (Bad Gateway) when any error occurs during the request</li>
+ * <li>503 (Service unavailable) when the instance is not found</li>
+ * <li>504 (Gateway timeout) when the request exceeds the timeout</li>
+ * </ul>
+ *
+ * <p>
+ * When an optional {@link ActuatorResponseCache} is supplied (together with an
+ * {@link HttpHeaderFilter}) the proxy transparently:
+ * <ol>
+ * <li>Returns a stored entry on a GET cache-hit without touching upstream.</li>
+ * <li>Buffers and caches a 2xx GET response body for subsequent requests.</li>
+ * <li>Invalidates the endpoint's cached entries after a successful mutating request
+ * (POST/PUT/PATCH/DELETE).</li>
+ * </ol>
+ * Fan-out calls ({@link #forward(Flux, ForwardRequest)}) are never cached.
  *
  * @author Johannes Edmeier
  */
@@ -65,25 +88,53 @@ public class InstanceWebProxy {
 
 	private final ExchangeStrategies strategies = ExchangeStrategies.withDefaults();
 
+	@Nullable private final ActuatorResponseCache cache;
+
+	@Nullable private final HttpHeaderFilter headerFilter;
+
+	private final DataBufferFactory bufferFactory = new DefaultDataBufferFactory();
+
 	public InstanceWebProxy(InstanceWebClient instanceWebClient) {
-		this.instanceWebClient = instanceWebClient;
+		this(instanceWebClient, null, null);
 	}
 
+	public InstanceWebProxy(InstanceWebClient instanceWebClient, @Nullable ActuatorResponseCache cache,
+			@Nullable HttpHeaderFilter headerFilter) {
+		this.instanceWebClient = instanceWebClient;
+		this.cache = cache;
+		this.headerFilter = headerFilter;
+	}
+
+	/**
+	 * Forwards a request to a single instance, applying cache semantics when a cache is
+	 * configured.
+	 * @param instanceMono reactive lookup of the target {@link Instance}
+	 * @param forwardRequest the request to proxy
+	 * @param responseHandler consumer of the (possibly cached) {@link ClientResponse}
+	 * @param <V> response type produced by {@code responseHandler}
+	 * @return result of {@code responseHandler}
+	 */
 	public <V> Mono<V> forward(Mono<Instance> instanceMono, ForwardRequest forwardRequest,
 			Function<ClientResponse, Mono<V>> responseHandler) {
 		return instanceMono.defaultIfEmpty(NULL_INSTANCE).flatMap((instance) -> {
 			if (!instance.equals(NULL_INSTANCE)) {
-				return this.forward(instance, forwardRequest, responseHandler);
+				return (this.cache != null) ? forwardWithCache(instance, forwardRequest, responseHandler)
+						: forwardUpstream(instance, forwardRequest, responseHandler);
 			}
-			else {
-				return Mono.defer(() -> responseHandler
-					.apply(ClientResponse.create(HttpStatus.SERVICE_UNAVAILABLE, this.strategies).build()));
-			}
+			return Mono.defer(() -> responseHandler
+				.apply(ClientResponse.create(HttpStatus.SERVICE_UNAVAILABLE, this.strategies).build()));
 		});
 	}
 
+	/**
+	 * Forwards a request to all instances of an application. Caching is never applied to
+	 * fan-out calls.
+	 * @param instances the instances to forward to
+	 * @param forwardRequest the request to proxy
+	 * @return a stream of per-instance responses
+	 */
 	public Flux<InstanceResponse> forward(Flux<Instance> instances, ForwardRequest forwardRequest) {
-		return instances.flatMap((instance) -> this.forward(instance, forwardRequest, (clientResponse) -> {
+		return instances.flatMap((instance) -> forwardUpstream(instance, forwardRequest, (clientResponse) -> {
 			InstanceResponse.Builder response = InstanceResponse.builder()
 				.instanceId(instance.getId())
 				.status(clientResponse.statusCode().value())
@@ -95,7 +146,99 @@ public class InstanceWebProxy {
 		}));
 	}
 
-	private <V> Mono<V> forward(Instance instance, ForwardRequest forwardRequest,
+	// ---- cache-aware forwarding ----------------------------------------------
+
+	private <V> Mono<V> forwardWithCache(Instance instance, ForwardRequest forwardRequest,
+			Function<ClientResponse, Mono<V>> responseHandler) {
+		InstanceId instanceId = instance.getId();
+		String endpointPath = forwardRequest.getUri().getPath();
+		String rawQuery = forwardRequest.getUri().getRawQuery();
+		HttpMethod method = forwardRequest.getMethod();
+		String endpointId = extractEndpointId(endpointPath);
+
+		Optional<CacheEntry> hit = lookupCache(instanceId, endpointPath, rawQuery, method, endpointId);
+		if (hit.isPresent()) {
+			return responseHandler.apply(buildClientResponse(hit.get()));
+		}
+
+		return forwardUpstream(instance, forwardRequest,
+				(cr) -> interceptResponse(cr, instanceId, endpointPath, rawQuery, endpointId, method, responseHandler));
+	}
+
+	private <V> Mono<V> interceptResponse(ClientResponse clientResponse, InstanceId instanceId, String endpointPath,
+			@Nullable String rawQuery, String endpointId, HttpMethod method,
+			Function<ClientResponse, Mono<V>> responseHandler) {
+		HttpStatusCode statusCode = clientResponse.statusCode();
+
+		if (isMutatingMethod(method) && statusCode.is2xxSuccessful()
+				&& this.cache.shouldCache(HttpMethod.GET, endpointId)) {
+			this.cache.invalidateEndpointForInstance(instanceId, endpointId);
+		}
+
+		if (this.cache.shouldCache(method, endpointId) && statusCode.is2xxSuccessful()) {
+			return bufferAndCache(clientResponse, instanceId, endpointPath, rawQuery, endpointId, statusCode,
+					responseHandler);
+		}
+
+		return responseHandler.apply(clientResponse);
+	}
+
+	private <V> Mono<V> bufferAndCache(ClientResponse clientResponse, InstanceId instanceId, String endpointPath,
+			@Nullable String rawQuery, String endpointId, HttpStatusCode statusCode,
+			Function<ClientResponse, Mono<V>> responseHandler) {
+		HttpHeaders originalHeaders = clientResponse.headers().asHttpHeaders();
+		return DataBufferUtils.join(clientResponse.body(BodyExtractors.toDataBuffers()))
+			.switchIfEmpty(Mono.fromSupplier(() -> this.bufferFactory.allocateBuffer(0)))
+			.flatMap((joined) -> {
+				byte[] bytes = new byte[joined.readableByteCount()];
+				joined.read(bytes);
+				DataBufferUtils.release(joined);
+				if (bytes.length <= this.cache.getMaxPayloadSize()) {
+					HttpHeaders filteredHeaders = this.headerFilter.filterHeaders(originalHeaders);
+					this.cache.put(instanceId, endpointPath, rawQuery,
+							new CacheEntry(statusCode.value(), filteredHeaders, bytes));
+					log.trace("Cached response for endpoint '{}' ({} bytes)", endpointId, bytes.length);
+				}
+				return responseHandler.apply(rebuildClientResponse(statusCode, originalHeaders, bytes));
+			});
+	}
+
+	// ---- cache helpers -------------------------------------------------------
+
+	private Optional<CacheEntry> lookupCache(InstanceId instanceId, String endpointPath, @Nullable String rawQuery,
+			HttpMethod method, String endpointId) {
+		if (!this.cache.shouldCache(method, endpointId)) {
+			return Optional.empty();
+		}
+		Optional<CacheEntry> entry = this.cache.get(instanceId, endpointPath, rawQuery);
+		if (entry.isPresent()) {
+			log.trace("Cache hit for instance {} endpoint '{}'", instanceId, endpointId);
+		}
+		else {
+			log.trace("Cache miss for instance {} endpoint '{}'", instanceId, endpointId);
+		}
+		return entry;
+	}
+
+	private ClientResponse buildClientResponse(CacheEntry entry) {
+		DataBuffer body = this.bufferFactory.wrap(entry.getBody());
+		return ClientResponse.create(HttpStatusCode.valueOf(entry.getStatusCode()), this.strategies)
+			.headers((h) -> h.addAll(entry.getHttpHeaders()))
+			.body(Flux.just(body))
+			.build();
+	}
+
+	private ClientResponse rebuildClientResponse(HttpStatusCode statusCode, HttpHeaders originalHeaders, byte[] bytes) {
+		DataBuffer body = this.bufferFactory.wrap(bytes);
+		return ClientResponse.create(statusCode, this.strategies)
+			.headers((h) -> h.addAll(originalHeaders))
+			.body(Flux.just(body))
+			.build();
+	}
+
+	// ---- upstream forwarding -------------------------------------------------
+
+	private <V> Mono<V> forwardUpstream(Instance instance, ForwardRequest forwardRequest,
 			Function<ClientResponse, Mono<V>> responseHandler) {
 		log.trace("Proxy-Request for instance {} with URL '{}'", instance.getId(), forwardRequest.getUri());
 		WebClient.RequestBodySpec bodySpec = this.instanceWebClient.instance(instance)
@@ -132,9 +275,23 @@ public class InstanceWebProxy {
 		});
 	}
 
+	// ---- static helpers ------------------------------------------------------
+
+	private static String extractEndpointId(String endpointPath) {
+		int slash = endpointPath.indexOf('/');
+		return (slash > 0) ? endpointPath.substring(0, slash) : endpointPath;
+	}
+
+	private static boolean isMutatingMethod(HttpMethod method) {
+		return HttpMethod.POST.equals(method) || HttpMethod.PUT.equals(method) || HttpMethod.PATCH.equals(method)
+				|| HttpMethod.DELETE.equals(method);
+	}
+
 	private boolean requiresBody(HttpMethod method) {
 		return List.of(PUT, POST, PATCH).contains(method);
 	}
+
+	// ---- nested types --------------------------------------------------------
 
 	@lombok.Data
 	@lombok.Builder(builderClassName = "Builder")
