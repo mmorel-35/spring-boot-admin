@@ -40,6 +40,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.reactive.function.BodyExtractors;
 import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -59,159 +60,183 @@ import de.codecentric.boot.admin.server.web.client.InstanceWebClient;
 @AdminController
 public class InstancesProxyController {
 
-	private static final Logger log = LoggerFactory.getLogger(InstancesProxyController.class);
+private static final Logger log = LoggerFactory.getLogger(InstancesProxyController.class);
 
-	private static final String INSTANCE_MAPPED_PATH = "/instances/{instanceId}/actuator/**";
+private static final String INSTANCE_MAPPED_PATH = "/instances/{instanceId}/actuator/**";
 
-	private static final String APPLICATION_MAPPED_PATH = "/applications/{applicationName}/actuator/**";
+private static final String APPLICATION_MAPPED_PATH = "/applications/{applicationName}/actuator/**";
 
-	private final PathMatcher pathMatcher = new AntPathMatcher();
+private final PathMatcher pathMatcher = new AntPathMatcher();
 
-	private final DataBufferFactory bufferFactory = new DefaultDataBufferFactory();
+private final DataBufferFactory bufferFactory = new DefaultDataBufferFactory();
 
-	private final InstanceRegistry registry;
+private final InstanceRegistry registry;
 
-	private final InstanceWebProxy instanceWebProxy;
+private final InstanceWebProxy instanceWebProxy;
 
-	private final String adminContextPath;
+private final String adminContextPath;
 
-	private final HttpHeaderFilter httpHeadersFilter;
+private final HttpHeaderFilter httpHeadersFilter;
 
-	@Nullable private final ActuatorResponseCache responseCache;
+@Nullable private final ActuatorResponseCache responseCache;
 
-	public InstancesProxyController(String adminContextPath, Set<String> ignoredHeaders, InstanceRegistry registry,
-			InstanceWebClient instanceWebClient) {
-		this(adminContextPath, ignoredHeaders, registry, instanceWebClient, null);
-	}
+public InstancesProxyController(String adminContextPath, Set<String> ignoredHeaders, InstanceRegistry registry,
+InstanceWebClient instanceWebClient) {
+this(adminContextPath, ignoredHeaders, registry, instanceWebClient, null);
+}
 
-	public InstancesProxyController(String adminContextPath, Set<String> ignoredHeaders, InstanceRegistry registry,
-			InstanceWebClient instanceWebClient, @Nullable ActuatorResponseCache responseCache) {
-		this.adminContextPath = adminContextPath;
-		this.registry = registry;
-		this.httpHeadersFilter = new HttpHeaderFilter(ignoredHeaders);
-		this.instanceWebProxy = new InstanceWebProxy(instanceWebClient);
-		this.responseCache = responseCache;
-	}
+public InstancesProxyController(String adminContextPath, Set<String> ignoredHeaders, InstanceRegistry registry,
+InstanceWebClient instanceWebClient, @Nullable ActuatorResponseCache responseCache) {
+this.adminContextPath = adminContextPath;
+this.registry = registry;
+this.httpHeadersFilter = new HttpHeaderFilter(ignoredHeaders);
+this.instanceWebProxy = new InstanceWebProxy(instanceWebClient);
+this.responseCache = responseCache;
+}
 
-	@RequestMapping(path = INSTANCE_MAPPED_PATH, method = { RequestMethod.GET, RequestMethod.HEAD, RequestMethod.POST,
-			RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE, RequestMethod.OPTIONS })
-	public Mono<Void> endpointProxy(@PathVariable("instanceId") String instanceId, ServerHttpRequest request,
-			ServerHttpResponse response) {
-		String localPath = getLocalPath(this.adminContextPath + INSTANCE_MAPPED_PATH, request);
-		String rawQuery = request.getURI().getRawQuery();
-		String endpointId = extractEndpointId(localPath);
+@RequestMapping(path = INSTANCE_MAPPED_PATH, method = { RequestMethod.GET, RequestMethod.HEAD, RequestMethod.POST,
+RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE, RequestMethod.OPTIONS })
+public Mono<Void> endpointProxy(@PathVariable("instanceId") String instanceId, ServerHttpRequest request,
+ServerHttpResponse response) {
+String localPath = getLocalPath(this.adminContextPath + INSTANCE_MAPPED_PATH, request);
+String rawQuery = request.getURI().getRawQuery();
+String endpointId = extractEndpointId(localPath);
+InstanceId id = InstanceId.of(instanceId);
 
-		// Serve from cache when possible (GET only, configured endpoints, cache hit)
-		if (this.responseCache != null && this.responseCache.shouldCache(request.getMethod(), endpointId)) {
-			InstanceId id = InstanceId.of(instanceId);
-			Optional<CacheEntry> cached = this.responseCache.get(id, localPath, rawQuery);
-			if (cached.isPresent()) {
-				log.trace("Cache hit for instance {} endpoint '{}'", instanceId, endpointId);
-				CacheEntry entry = cached.get();
-				response.setStatusCode(HttpStatusCode.valueOf(entry.getStatusCode()));
-				response.getHeaders().addAll(entry.getHttpHeaders());
-				DataBuffer buf = this.bufferFactory.wrap(entry.getBody());
-				return response.writeAndFlushWith(Flux.just(Flux.just(buf)));
-			}
-			log.trace("Cache miss for instance {} endpoint '{}'", instanceId, endpointId);
-		}
+Optional<CacheEntry> cached = tryGetFromCache(id, localPath, rawQuery, request.getMethod(), endpointId);
+if (cached.isPresent()) {
+return writeCacheHit(cached.get(), response);
+}
 
-		InstanceWebProxy.ForwardRequest fwdRequest = createForwardRequest(request, request.getBody(), localPath,
-				rawQuery);
+InstanceWebProxy.ForwardRequest fwdRequest = createForwardRequest(request, request.getBody(), localPath,
+rawQuery);
+return this.instanceWebProxy.forward(this.registry.getInstance(id), fwdRequest,
+(clientResponse) -> handleUpstreamResponse(clientResponse, id, localPath, rawQuery, endpointId,
+request.getMethod(), response));
+}
 
-		return this.instanceWebProxy.forward(this.registry.getInstance(InstanceId.of(instanceId)), fwdRequest,
-				(clientResponse) -> {
-					HttpStatusCode statusCode = clientResponse.statusCode();
-					HttpHeaders filteredHeaders = this.httpHeadersFilter
-						.filterHeaders(clientResponse.headers().asHttpHeaders());
-					response.setStatusCode(statusCode);
-					response.getHeaders().addAll(filteredHeaders);
+@ResponseBody
+@RequestMapping(path = APPLICATION_MAPPED_PATH, method = { RequestMethod.GET, RequestMethod.HEAD,
+RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE, RequestMethod.OPTIONS })
+public Flux<InstanceWebProxy.InstanceResponse> endpointProxy(
+@PathVariable("applicationName") String applicationName, ServerHttpRequest request) {
 
-					boolean fillCache = this.responseCache != null
-							&& this.responseCache.shouldCache(request.getMethod(), endpointId)
-							&& statusCode.is2xxSuccessful();
+Flux<DataBuffer> cachedBody = request.getBody().map((b) -> {
+DataBuffer dataBuffer = this.bufferFactory.allocateBuffer(b.readableByteCount());
+try (var iterator = b.readableByteBuffers()) {
+iterator.forEachRemaining(dataBuffer::write);
+}
+DataBufferUtils.release(b);
+return dataBuffer;
+}).cache();
 
-					// After a successful mutating request, evict that endpoint's cache
-					// entries
-					// so the next GET returns fresh data.
-					if (this.responseCache != null && isMutatingMethod(request.getMethod())
-							&& statusCode.is2xxSuccessful()
-							&& this.responseCache.shouldCache(HttpMethod.GET, endpointId)) {
-						this.responseCache.invalidateEndpointForInstance(InstanceId.of(instanceId), endpointId);
-					}
+InstanceWebProxy.ForwardRequest fwdRequest = createForwardRequest(request, cachedBody,
+this.adminContextPath + APPLICATION_MAPPED_PATH);
 
-					if (fillCache) {
-						InstanceId id = InstanceId.of(instanceId);
-						return DataBufferUtils.join(clientResponse.body(BodyExtractors.toDataBuffers()))
-							.switchIfEmpty(Mono.fromSupplier(() -> this.bufferFactory.allocateBuffer(0)))
-							.flatMap((joined) -> {
-								byte[] bytes = new byte[joined.readableByteCount()];
-								joined.read(bytes);
-								DataBufferUtils.release(joined);
-								if (bytes.length <= this.responseCache.getMaxPayloadSize()) {
-									this.responseCache.put(id, localPath, rawQuery,
-											new CacheEntry(statusCode.value(), filteredHeaders, bytes));
-									log.trace("Cached response for instance {} endpoint '{}' ({} bytes)", instanceId,
-											endpointId, bytes.length);
-								}
-								return response.writeAndFlushWith(Flux.just(Flux.just(this.bufferFactory.wrap(bytes))));
-							});
-					}
+return this.instanceWebProxy.forward(this.registry.getInstances(applicationName), fwdRequest);
+}
 
-					return response.writeAndFlushWith(clientResponse.body(BodyExtractors.toDataBuffers()).window(1));
-				});
-	}
+// --- cache interaction helpers ---
 
-	@ResponseBody
-	@RequestMapping(path = APPLICATION_MAPPED_PATH, method = { RequestMethod.GET, RequestMethod.HEAD,
-			RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE, RequestMethod.OPTIONS })
-	public Flux<InstanceWebProxy.InstanceResponse> endpointProxy(
-			@PathVariable("applicationName") String applicationName, ServerHttpRequest request) {
+private Optional<CacheEntry> tryGetFromCache(InstanceId id, String localPath, @Nullable String rawQuery,
+HttpMethod method, String endpointId) {
+if (this.responseCache == null || !this.responseCache.shouldCache(method, endpointId)) {
+return Optional.empty();
+}
+Optional<CacheEntry> entry = this.responseCache.get(id, localPath, rawQuery);
+if (entry.isPresent()) {
+log.trace("Cache hit for instance {} endpoint '{}'", id, endpointId);
+}
+else {
+log.trace("Cache miss for instance {} endpoint '{}'", id, endpointId);
+}
+return entry;
+}
 
-		Flux<DataBuffer> cachedBody = request.getBody().map((b) -> {
-			DataBuffer dataBuffer = this.bufferFactory.allocateBuffer(b.readableByteCount());
-			try (var iterator = b.readableByteBuffers()) {
-				iterator.forEachRemaining(dataBuffer::write);
-			}
-			DataBufferUtils.release(b);
-			return dataBuffer;
-		}).cache();
+private Mono<Void> writeCacheHit(CacheEntry entry, ServerHttpResponse response) {
+response.setStatusCode(HttpStatusCode.valueOf(entry.getStatusCode()));
+response.getHeaders().addAll(entry.getHttpHeaders());
+DataBuffer buf = this.bufferFactory.wrap(entry.getBody());
+return response.writeAndFlushWith(Flux.just(Flux.just(buf)));
+}
 
-		InstanceWebProxy.ForwardRequest fwdRequest = createForwardRequest(request, cachedBody,
-				this.adminContextPath + APPLICATION_MAPPED_PATH);
+private Mono<Void> handleUpstreamResponse(ClientResponse clientResponse, InstanceId id, String localPath,
+@Nullable String rawQuery, String endpointId, HttpMethod method, ServerHttpResponse response) {
+HttpStatusCode statusCode = clientResponse.statusCode();
+HttpHeaders filteredHeaders = this.httpHeadersFilter.filterHeaders(clientResponse.headers().asHttpHeaders());
+response.setStatusCode(statusCode);
+response.getHeaders().addAll(filteredHeaders);
 
-		return this.instanceWebProxy.forward(this.registry.getInstances(applicationName), fwdRequest);
-	}
+onMutation(id, endpointId, method, statusCode);
 
-	private InstanceWebProxy.ForwardRequest createForwardRequest(ServerHttpRequest request, Flux<DataBuffer> body,
-			String pathPattern) {
-		return createForwardRequest(request, body, getLocalPath(pathPattern, request), request.getURI().getRawQuery());
-	}
+if (shouldBufferAndCache(method, endpointId, statusCode)) {
+return bufferAndCacheResponse(clientResponse, id, localPath, rawQuery, endpointId, statusCode,
+filteredHeaders, response);
+}
+return response.writeAndFlushWith(clientResponse.body(BodyExtractors.toDataBuffers()).window(1));
+}
 
-	private InstanceWebProxy.ForwardRequest createForwardRequest(ServerHttpRequest request, Flux<DataBuffer> body,
-			String localPath, @Nullable String rawQuery) {
-		URI uri = UriComponentsBuilder.fromPath(localPath).query(rawQuery).build(true).toUri();
-		return InstanceWebProxy.ForwardRequest.builder()
-			.uri(uri)
-			.method(request.getMethod())
-			.headers(this.httpHeadersFilter.filterHeaders(request.getHeaders()))
-			.body(BodyInserters.fromDataBuffers(body))
-			.build();
-	}
+private void onMutation(InstanceId id, String endpointId, HttpMethod method, HttpStatusCode statusCode) {
+if (this.responseCache != null && isMutatingMethod(method) && statusCode.is2xxSuccessful()
+&& this.responseCache.shouldCache(HttpMethod.GET, endpointId)) {
+this.responseCache.invalidateEndpointForInstance(id, endpointId);
+}
+}
 
-	private String getLocalPath(String pathPattern, ServerHttpRequest request) {
-		String pathWithinApplication = request.getPath().pathWithinApplication().value();
-		return this.pathMatcher.extractPathWithinPattern(pathPattern, pathWithinApplication);
-	}
+private boolean shouldBufferAndCache(HttpMethod method, String endpointId, HttpStatusCode statusCode) {
+return this.responseCache != null && this.responseCache.shouldCache(method, endpointId)
+&& statusCode.is2xxSuccessful();
+}
 
-	private static String extractEndpointId(String localPath) {
-		int slash = localPath.indexOf('/');
-		return (slash > 0) ? localPath.substring(0, slash) : localPath;
-	}
+private Mono<Void> bufferAndCacheResponse(ClientResponse clientResponse, InstanceId id, String localPath,
+@Nullable String rawQuery, String endpointId, HttpStatusCode statusCode, HttpHeaders filteredHeaders,
+ServerHttpResponse response) {
+return DataBufferUtils.join(clientResponse.body(BodyExtractors.toDataBuffers()))
+.switchIfEmpty(Mono.fromSupplier(() -> this.bufferFactory.allocateBuffer(0)))
+.flatMap((joined) -> {
+byte[] bytes = new byte[joined.readableByteCount()];
+joined.read(bytes);
+DataBufferUtils.release(joined);
+if (bytes.length <= this.responseCache.getMaxPayloadSize()) {
+this.responseCache.put(id, localPath, rawQuery,
+new CacheEntry(statusCode.value(), filteredHeaders, bytes));
+log.trace("Cached response for endpoint '{}' ({} bytes)", endpointId, bytes.length);
+}
+return response.writeAndFlushWith(Flux.just(Flux.just(this.bufferFactory.wrap(bytes))));
+});
+}
 
-	private static boolean isMutatingMethod(HttpMethod method) {
-		return HttpMethod.POST.equals(method) || HttpMethod.PUT.equals(method) || HttpMethod.PATCH.equals(method)
-				|| HttpMethod.DELETE.equals(method);
-	}
+// --- request / path helpers ---
+
+private InstanceWebProxy.ForwardRequest createForwardRequest(ServerHttpRequest request, Flux<DataBuffer> body,
+String pathPattern) {
+return createForwardRequest(request, body, getLocalPath(pathPattern, request), request.getURI().getRawQuery());
+}
+
+private InstanceWebProxy.ForwardRequest createForwardRequest(ServerHttpRequest request, Flux<DataBuffer> body,
+String localPath, @Nullable String rawQuery) {
+URI uri = UriComponentsBuilder.fromPath(localPath).query(rawQuery).build(true).toUri();
+return InstanceWebProxy.ForwardRequest.builder()
+.uri(uri)
+.method(request.getMethod())
+.headers(this.httpHeadersFilter.filterHeaders(request.getHeaders()))
+.body(BodyInserters.fromDataBuffers(body))
+.build();
+}
+
+private String getLocalPath(String pathPattern, ServerHttpRequest request) {
+String pathWithinApplication = request.getPath().pathWithinApplication().value();
+return this.pathMatcher.extractPathWithinPattern(pathPattern, pathWithinApplication);
+}
+
+private static String extractEndpointId(String localPath) {
+int slash = localPath.indexOf('/');
+return (slash > 0) ? localPath.substring(0, slash) : localPath;
+}
+
+private static boolean isMutatingMethod(HttpMethod method) {
+return HttpMethod.POST.equals(method) || HttpMethod.PUT.equals(method) || HttpMethod.PATCH.equals(method)
+|| HttpMethod.DELETE.equals(method);
+}
 
 }
