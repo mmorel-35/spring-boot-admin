@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.convert.DurationUnit;
 
@@ -186,6 +187,32 @@ public class AdminServerProperties {
 		 * Map of instance credentials per registered service name
 		 */
 		private Map<String, InstanceCredentials> serviceMap = new HashMap<>();
+
+		/**
+		 * OAuth2 Client Credentials configuration for instance authentication. Only used
+		 * when {@code spring-security-oauth2-client} is on the classpath.
+		 */
+		private InstanceOAuth2Properties oauth2 = new InstanceOAuth2Properties();
+
+	}
+
+	@lombok.Data
+	public static class InstanceOAuth2Properties {
+
+		/**
+		 * Default OAuth2 client registration ID used to obtain a Bearer token for all
+		 * registered instances. Requires a matching
+		 * {@code spring.security.oauth2.client.registration.<id>} with
+		 * {@code authorization-grant-type: client_credentials}.
+		 */
+		@Nullable private String defaultRegistrationId;
+
+		/**
+		 * Per-service OAuth2 registration ID override. Key is the service name as
+		 * registered in Spring Boot Admin; value is the registration ID. Takes precedence
+		 * over {@link #defaultRegistrationId}.
+		 */
+		private Map<String, String> serviceMap = new HashMap<>();
 
 	}
 

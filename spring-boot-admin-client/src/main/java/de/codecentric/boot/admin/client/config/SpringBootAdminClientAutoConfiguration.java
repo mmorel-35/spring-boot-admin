@@ -93,6 +93,18 @@ public class SpringBootAdminClientAutoConfiguration {
 		return new StartupDateMetadataContributor();
 	}
 
+	static void customizeRestClientBuilder(RestClient.Builder restClientBuilder, ClientProperties client,
+			ObjectProvider<JsonMapper> objectMapper) {
+		var factorySettings = HttpClientSettings.defaults()
+			.withConnectTimeout(client.getConnectTimeout())
+			.withReadTimeout(client.getReadTimeout());
+		restClientBuilder.requestFactory(ClientHttpRequestFactoryBuilder.detect().build(factorySettings));
+		objectMapper.ifAvailable((mapper) -> restClientBuilder.messageConverters((converters) -> {
+			converters.removeIf(JacksonJsonHttpMessageConverter.class::isInstance);
+			converters.add(new JacksonJsonHttpMessageConverter(mapper));
+		}));
+	}
+
 	@Configuration(proxyBeanMethods = false)
 	@ConditionalOnWebApplication(type = Type.SERVLET)
 	@AutoConfigureAfter(DispatcherServletAutoConfiguration.class)
@@ -138,18 +150,7 @@ public class SpringBootAdminClientAutoConfiguration {
 		@ConditionalOnMissingBean
 		public RegistrationClient registrationClient(ClientProperties client, RestClient.Builder restClientBuilder,
 				ObjectProvider<JsonMapper> objectMapper) {
-			var factorySettings = HttpClientSettings.defaults()
-				.withConnectTimeout(client.getConnectTimeout())
-				.withReadTimeout(client.getReadTimeout());
-
-			var clientHttpRequestFactory = ClientHttpRequestFactoryBuilder.detect().build(factorySettings);
-
-			restClientBuilder.requestFactory(clientHttpRequestFactory);
-
-			objectMapper.ifAvailable((mapper) -> restClientBuilder.messageConverters((configurer) -> {
-				configurer.removeIf(JacksonJsonHttpMessageConverter.class::isInstance);
-				configurer.add(new JacksonJsonHttpMessageConverter(mapper));
-			}));
+			customizeRestClientBuilder(restClientBuilder, client, objectMapper);
 
 			if (client.getUsername() != null && client.getPassword() != null) {
 				restClientBuilder
